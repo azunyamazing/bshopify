@@ -1,26 +1,29 @@
 import { Command } from "commander";
+import { execa, type Options } from "execa";
 import {
-  formatInitResult,
-  initProject,
-  type InitOptions,
-} from "./commands/init/index.js";
+  createAppCommand,
+  shouldHandleAppCommandLocally,
+  shouldHandleAppHelpLocally,
+  type AppCommandDependencies,
+} from "./commands/app/index.js";
 
-export { formatInitResult, initProject };
-export type { InitCheck, InitOptions, InitResult } from "./commands/init/index.js";
+export { formatInitResult, initProject } from "./commands/app/index.js";
+export type { InitCheck, InitOptions, InitResult } from "./commands/app/index.js";
 
 export interface PackageInfo {
   name: string;
   version: string;
 }
 
-interface CommandDefinition {
-  name: string;
-  description: string;
-}
+export type ShopifyCommandRunner = (args: string[]) => Promise<number | void>;
+export type ProcessRunner = (
+  file: string,
+  args: string[],
+  options: Options,
+) => Promise<{ exitCode?: number }>;
 
-interface InitCommandOptions {
-  check?: boolean;
-  cwd?: string;
+export interface CliDependencies extends AppCommandDependencies {
+  runShopifyCommand?: ShopifyCommandRunner;
 }
 
 export const packageInfo: PackageInfo = {
@@ -28,71 +31,103 @@ export const packageInfo: PackageInfo = {
   version: "0.1.0",
 };
 
-const commandDefinitions: CommandDefinition[] = [
-  {
-    name: "dev",
-    description: "Run shopify app dev with temporary extension injections.",
-  },
-  {
-    name: "deploy",
-    description:
-      "Run shopify app deploy with validation, injection, and restore.",
-  },
-  {
-    name: "validate",
-    description:
-      "Validate runner config, Shopify config, entries, and injections.",
-  },
-  {
-    name: "guard",
-    description:
-      "Prevent unsafe injected values or active locks from being committed.",
-  },
-  {
-    name: "restore <runId>",
-    description: "Restore files from a previous bshopify transaction.",
-  },
-];
-
-export function createCliProgram(): Command {
+export function createCliProgram(dependencies: CliDependencies = {}): Command {
   const program = new Command();
 
   program
     .name("bshopify")
     .description("BestFulfill Shopify App Runner")
     .version(packageInfo.version)
+    .addHelpCommand(false)
     .showHelpAfterError();
 
-  program
-    .command("init")
-    .description("Initialize bshopify in the current Shopify app project.")
-    .option("--check", "only check project readiness without writing files")
-    .option("--cwd <path>", "project directory to initialize")
-    .action(async (options: InitCommandOptions) => {
-      const result = await initProject(toInitOptions(options));
-      console.log(formatInitResult(result));
-
-      if (result.errors.length > 0) {
-        process.exitCode = 1;
-      }
-    });
-
-  for (const commandDefinition of commandDefinitions) {
-    program
-      .command(commandDefinition.name)
-      .description(commandDefinition.description);
-  }
+  program.addCommand(createAppCommand(dependencies));
 
   return program;
 }
 
-export async function runCli(argv: string[] = process.argv): Promise<void> {
-  await createCliProgram().parseAsync(argv);
+export async function runCli(
+  argv: string[] = process.argv,
+  dependencies: CliDependencies = {},
+): Promise<void> {
+  const args = argv.slice(2);
+
+  if (shouldHandleLocally(args)) {
+    await createCliProgram(dependencies).parseAsync(argv);
+    return;
+  }
+
+  const runShopify = dependencies.runShopifyCommand ?? runShopifyCommand;
+  const exitCode = await runShopify(args);
+
+  if (typeof exitCode === "number") {
+    process.exitCode = exitCode;
+  }
 }
 
-function toInitOptions(options: InitCommandOptions): InitOptions {
-  return {
-    check: options.check,
-    cwd: options.cwd,
-  };
+export async function runShopifyCommand(
+  args: string[],
+  runner: ProcessRunner = execa,
+): Promise<number> {
+  try {
+    const result = await runner("shopify", args, {
+      localDir: process.cwd(),
+      preferLocal: true,
+      stdio: "inherit",
+    });
+
+    return result.exitCode ?? 0;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      throw new Error(
+        "Shopify CLI is not available. Install it globally with npm install -g @shopify/cli@latest, or add @shopify/cli to this project.",
+      );
+    }
+
+    throw error;
+  }
+}
+
+function shouldHandleLocally(args: string[]): boolean {
+  const [command] = args;
+
+  if (command === undefined || isHelpOrVersionOption(command)) {
+    return true;
+  }
+
+  if (command === "help") {
+    return shouldHandleHelpLocally(args.slice(1));
+  }
+
+  if (command !== "app") {
+    return false;
+  }
+
+  return shouldHandleAppCommandLocally(args.slice(1));
+}
+
+function isHelpOrVersionOption(value: string): boolean {
+  return isHelpOption(value) || value === "--version" || value === "-V";
+}
+
+function shouldHandleHelpLocally(args: string[]): boolean {
+  const [command] = args;
+
+  if (command === undefined) {
+    return true;
+  }
+
+  if (command !== "app") {
+    return false;
+  }
+
+  return shouldHandleAppHelpLocally(args.slice(1));
+}
+
+function isHelpOption(value: string): boolean {
+  return value === "--help" || value === "-h";
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }

@@ -15,6 +15,8 @@ import {
   entryFileName,
   extensionEntryTemplate,
   legacyPreCommitGuardCommand,
+  legacyPreCommitGuardEndMarker,
+  legacyPreCommitGuardStartMarker,
   preCommitGuardCommand,
   preCommitGuardEndMarker,
   preCommitGuardStartMarker,
@@ -279,13 +281,36 @@ function formatScriptChange(
 
 function insertPreCommitGuardBlock(current: string): string {
   const guardBlock = `${preCommitGuardStartMarker}\n${preCommitGuardCommand}\n${preCommitGuardEndMarker}`;
-  const lines = current
-    .split("\n")
-    .filter((line) => line.trim() !== legacyPreCommitGuardCommand);
+  const lines = removeLegacyPreCommitGuardBlock(current.split("\n")).filter(
+    (line) => line.trim() !== legacyPreCommitGuardCommand,
+  );
   const insertIndex = lines[0]?.startsWith("#!") ? 1 : 0;
   lines.splice(insertIndex, 0, guardBlock);
 
   return `${lines.join("\n")}${current.endsWith("\n") ? "" : "\n"}`;
+}
+
+function removeLegacyPreCommitGuardBlock(lines: string[]): string[] {
+  const next: string[] = [];
+  let isInsideLegacyGuardBlock = false;
+
+  for (const line of lines) {
+    if (line === legacyPreCommitGuardStartMarker) {
+      isInsideLegacyGuardBlock = true;
+      continue;
+    }
+
+    if (line === legacyPreCommitGuardEndMarker) {
+      isInsideLegacyGuardBlock = false;
+      continue;
+    }
+
+    if (!isInsideLegacyGuardBlock) {
+      next.push(line);
+    }
+  }
+
+  return next;
 }
 
 async function readExtensionNames(cwd: string): Promise<string[]> {
@@ -353,13 +378,14 @@ async function readGitPath(cwd: string, path: string): Promise<string | undefine
 
 export function formatInitResult(result: InitResult): string {
   const lines = [
+    "",
     ...formatChecks(result.checks),
     ...formatSection("created", result.created),
     ...formatSection("updated", result.updated),
     ...formatSection("skipped", result.skipped),
     ...formatSection("warnings", result.warnings),
     ...formatSection("errors", result.errors),
-    "\n"
+    "\n",
   ];
 
   return lines.join("\n");

@@ -9,8 +9,8 @@ export const requiredShopifyConfigFiles = [
 ];
 
 export const recommendedScripts: Record<string, string> = {
-  dev: "bshopify dev",
-  deploy: "bshopify deploy",
+  dev: "bshopify app dev",
+  deploy: "bshopify app deploy",
 };
 
 export const runnerConfigTemplate = `// bshopify runner config
@@ -66,13 +66,15 @@ export const extensionEntryTemplate = `export default {
 `;
 
 export const legacyPreCommitGuardCommand = "bshopify guard";
+export const legacyPreCommitGuardEndMarker = "# bshopify guard end";
+export const legacyPreCommitGuardStartMarker = "# bshopify guard start";
 export const preCommitGuardCommand = `if [ -x "./node_modules/.bin/bshopify" ]; then
-  ./node_modules/.bin/bshopify guard
+  ./node_modules/.bin/bshopify app guard
 else
-  bshopify guard
+  bshopify app guard
 fi`;
-export const preCommitGuardEndMarker = "# bshopify guard end";
-export const preCommitGuardStartMarker = "# bshopify guard start";
+export const preCommitGuardEndMarker = "# bshopify app guard end";
+export const preCommitGuardStartMarker = "# bshopify app guard start";
 
 export const preCommitHookTemplate = `#!/usr/bin/env sh
 set -e

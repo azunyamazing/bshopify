@@ -91,7 +91,7 @@ describe("initProject", () => {
       ".bshopify-tmp/",
     );
     await expect(readFile(join(cwd, ".git", "hooks", "pre-commit"), "utf8")).resolves.toContain(
-      "./node_modules/.bin/bshopify guard",
+      "./node_modules/.bin/bshopify app guard",
     );
     await expect(
       readFile(join(cwd, "extensions", "theme-extension", "__entry.js"), "utf8"),
@@ -100,8 +100,8 @@ describe("initProject", () => {
     const packageJson = JSON.parse(
       await readFile(join(cwd, "package.json"), "utf8"),
     ) as FixturePackageJson;
-    expect(packageJson.scripts.dev).toBe("bshopify dev");
-    expect(packageJson.scripts.deploy).toBe("bshopify deploy");
+    expect(packageJson.scripts.dev).toBe("bshopify app dev");
+    expect(packageJson.scripts.deploy).toBe("bshopify app deploy");
     expect(packageJson.scripts.lint).toBe("eslint .");
     expect(packageJson.scripts["shopify:dev"]).toBeUndefined();
     expect(packageJson.scripts["shopify:deploy"]).toBeUndefined();
@@ -110,7 +110,7 @@ describe("initProject", () => {
     expect(result.errors).toEqual([]);
     expect(result.created).toContain("bshopify.config.mjs");
     expect(result.updated).toContain(
-      'package.json scripts: replaced dev: "shopify app dev" -> "bshopify dev"',
+      'package.json scripts: replaced dev: "shopify app dev" -> "bshopify app dev"',
     );
     expect(result.updated).toContain("package.json scripts: added deploy");
   });
@@ -123,9 +123,9 @@ describe("initProject", () => {
     const result = await initProject({ cwd });
     const hook = await readFile(hookPath, "utf8");
 
-    expect(hook).toContain("# bshopify guard start");
-    expect(hook.indexOf("bshopify guard")).toBeLessThan(hook.indexOf("exit 0"));
-    expect(hook).toContain("# bshopify guard end");
+    expect(hook).toContain("# bshopify app guard start");
+    expect(hook.indexOf("bshopify app guard")).toBeLessThan(hook.indexOf("exit 0"));
+    expect(hook).toContain("# bshopify app guard end");
     expect(hook).toContain("exit 0");
     expect(hook).toContain("npm test");
     expect(result.updated).toContain(".git/hooks/pre-commit");
@@ -136,17 +136,17 @@ describe("initProject", () => {
     const hookPath = join(cwd, ".git", "hooks", "pre-commit");
     await writeFile(
       hookPath,
-      "#!/usr/bin/env sh\n# bshopify guard start\nbshopify guard\n# bshopify guard end\nnpm test\n",
+      "#!/usr/bin/env sh\n# bshopify app guard start\nbshopify app guard\n# bshopify app guard end\nnpm test\n",
     );
 
     const result = await initProject({ cwd });
     const hook = await readFile(hookPath, "utf8");
 
-    expect(hook.match(/# bshopify guard start/g)).toHaveLength(1);
+    expect(hook.match(/# bshopify app guard start/g)).toHaveLength(1);
     expect(result.skipped).toContain(".git/hooks/pre-commit");
   });
 
-  it("upgrades legacy bare guard commands into a guard block", async () => {
+  it("upgrades legacy bare guard commands into an app guard block", async () => {
     const cwd = await createTempProject();
     const hookPath = join(cwd, ".git", "hooks", "pre-commit");
     await writeFile(hookPath, "#!/usr/bin/env sh\nexit 0\nbshopify guard\n");
@@ -154,10 +154,28 @@ describe("initProject", () => {
     const result = await initProject({ cwd });
     const hook = await readFile(hookPath, "utf8");
 
-    expect(hook).toContain("# bshopify guard start");
-    expect(hook.indexOf("bshopify guard")).toBeLessThan(hook.indexOf("exit 0"));
+    expect(hook).toContain("# bshopify app guard start");
+    expect(hook.indexOf("bshopify app guard")).toBeLessThan(hook.indexOf("exit 0"));
     expect(hook.match(/^bshopify guard$/gm)).toBeNull();
-    expect(hook).toContain("./node_modules/.bin/bshopify guard");
+    expect(hook).toContain("./node_modules/.bin/bshopify app guard");
+    expect(result.updated).toContain(".git/hooks/pre-commit");
+  });
+
+  it("upgrades legacy marked guard blocks into an app guard block", async () => {
+    const cwd = await createTempProject();
+    const hookPath = join(cwd, ".git", "hooks", "pre-commit");
+    await writeFile(
+      hookPath,
+      "#!/usr/bin/env sh\n# bshopify guard start\nbshopify guard\n# bshopify guard end\nnpm test\n",
+    );
+
+    const result = await initProject({ cwd });
+    const hook = await readFile(hookPath, "utf8");
+
+    expect(hook).toContain("# bshopify app guard start");
+    expect(hook).toContain("./node_modules/.bin/bshopify app guard");
+    expect(hook).not.toContain("# bshopify guard start");
+    expect(hook.match(/^bshopify guard$/gm)).toBeNull();
     expect(result.updated).toContain(".git/hooks/pre-commit");
   });
 
@@ -168,7 +186,7 @@ describe("initProject", () => {
     const result = await initProject({ cwd });
 
     await expect(readFile(join(cwd, ".custom-hooks", "pre-commit"), "utf8")).resolves.toContain(
-      "bshopify guard",
+      "bshopify app guard",
     );
     expect(result.created).toContain(".custom-hooks/pre-commit");
   });
@@ -181,7 +199,7 @@ describe("initProject", () => {
     const result = await initProject({ cwd });
 
     await expect(readFile(join(hooksPath, "pre-commit"), "utf8")).resolves.toContain(
-      "bshopify guard",
+      "bshopify app guard",
     );
     expect(result.created).toContain("absolute-hooks/pre-commit");
   });
@@ -195,7 +213,7 @@ describe("initProject", () => {
 
     const result = await initProject({ cwd });
 
-    await expect(readFile(hookPath, "utf8")).resolves.toContain("bshopify guard");
+    await expect(readFile(hookPath, "utf8")).resolves.toContain("bshopify app guard");
     expect(result.created).toContain(hookPath);
   });
 
