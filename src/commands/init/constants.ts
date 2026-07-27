@@ -1,0 +1,83 @@
+export const configFileName = "bshopify.config.mjs";
+export const entryFileName = "__entry.js";
+export const tmpRoot = ".bshopify-tmp/";
+
+export const requiredShopifyConfigFiles = [
+  "shopify.app.dev.toml",
+  "shopify.app.test.toml",
+  "shopify.app.production.toml",
+];
+
+export const recommendedScripts: Record<string, string> = {
+  dev: "bshopify dev",
+  deploy: "bshopify deploy",
+};
+
+export const runnerConfigTemplate = `// bshopify runner config
+// This file controls how bshopify discovers Shopify extensions and config files.
+export default {
+  // Directory that contains Shopify extension folders.
+  extensionsRoot: "extensions",
+
+  // Temporary transaction directory used while injecting and restoring files.
+  tmpRoot: ".bshopify-tmp",
+
+  // Business-side extension entry file generated under each extension.
+  entryFileName: "__entry.js",
+
+  // Shopify app config files by environment.
+  configFiles: {
+    dev: "shopify.app.dev.toml",
+    test: "shopify.app.test.toml",
+    production: "shopify.app.production.toml",
+  },
+
+  // Fail when an injection plan leaves template placeholders unresolved.
+  failOnUnresolvedPlaceholders: true,
+
+  // Hide extension entry files before deploy so they are not shipped.
+  hideEntryBeforeDeploy: true,
+};
+`;
+
+export const extensionEntryTemplate = `export default {
+  async prepare(ctx) {
+    return {
+      extension: ctx.extension.name,
+      injections: [
+        // {
+        //   file: "blocks/app-embed.liquid",
+        //   strategy: "replace",
+        //   pattern: "__SHOPIFY_APP_PROXY_BASE__",
+        //   value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,
+        // },
+      ],
+    };
+  },
+
+  async validate(ctx, plan) {},
+
+  async beforeDeploy(ctx, plan, plans) {},
+
+  async afterDeploy(ctx, result) {},
+
+  async onError(ctx, error) {},
+};
+`;
+
+export const legacyPreCommitGuardCommand = "bshopify guard";
+export const preCommitGuardCommand = `if [ -x "./node_modules/.bin/bshopify" ]; then
+  ./node_modules/.bin/bshopify guard
+else
+  bshopify guard
+fi`;
+export const preCommitGuardEndMarker = "# bshopify guard end";
+export const preCommitGuardStartMarker = "# bshopify guard start";
+
+export const preCommitHookTemplate = `#!/usr/bin/env sh
+set -e
+
+${preCommitGuardStartMarker}
+${preCommitGuardCommand}
+${preCommitGuardEndMarker}
+`;

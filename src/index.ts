@@ -1,4 +1,12 @@
 import { Command } from "commander";
+import {
+  formatInitResult,
+  initProject,
+  type InitOptions,
+} from "./commands/init/index.js";
+
+export { formatInitResult, initProject };
+export type { InitCheck, InitOptions, InitResult } from "./commands/init/index.js";
 
 export interface PackageInfo {
   name: string;
@@ -10,16 +18,17 @@ interface CommandDefinition {
   description: string;
 }
 
+interface InitCommandOptions {
+  check?: boolean;
+  cwd?: string;
+}
+
 export const packageInfo: PackageInfo = {
   name: "@bestfulfill/bshopify",
   version: "0.1.0",
 };
 
 const commandDefinitions: CommandDefinition[] = [
-  {
-    name: "init",
-    description: "Initialize bshopify in the current Shopify app project.",
-  },
   {
     name: "dev",
     description: "Run shopify app dev with temporary extension injections.",
@@ -54,6 +63,20 @@ export function createCliProgram(): Command {
     .version(packageInfo.version)
     .showHelpAfterError();
 
+  program
+    .command("init")
+    .description("Initialize bshopify in the current Shopify app project.")
+    .option("--check", "only check project readiness without writing files")
+    .option("--cwd <path>", "project directory to initialize")
+    .action(async (options: InitCommandOptions) => {
+      const result = await initProject(toInitOptions(options));
+      console.log(formatInitResult(result));
+
+      if (result.errors.length > 0) {
+        process.exitCode = 1;
+      }
+    });
+
   for (const commandDefinition of commandDefinitions) {
     program
       .command(commandDefinition.name)
@@ -65,4 +88,11 @@ export function createCliProgram(): Command {
 
 export async function runCli(argv: string[] = process.argv): Promise<void> {
   await createCliProgram().parseAsync(argv);
+}
+
+function toInitOptions(options: InitCommandOptions): InitOptions {
+  return {
+    check: options.check,
+    cwd: options.cwd,
+  };
 }
