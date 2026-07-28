@@ -12,6 +12,7 @@ export interface RunnerConfig {
   entryFileName: string;
   extensionsRoot: string;
   failOnUnresolvedPlaceholders: boolean;
+  restoreMarkers: boolean;
   tmpRoot: string;
 }
 
@@ -120,7 +121,7 @@ export interface FileTransaction {
 }
 
 export interface ReverseReplacement {
-  marker: string;
+  marker?: string;
   pattern: string;
   value: string;
 }

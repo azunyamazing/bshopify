@@ -148,6 +148,16 @@ bshopify app dev
 bshopify app dev --config test
 ```
 
+`dev` 默认会在注入值后追加按文件类型生成的 restore marker，结束后只恢复本轮注入的值。若遇到未覆盖的文件类型或注释语法不兼容，可在 `bshopify.config.mjs` 中关闭：
+
+```js
+export default {
+  restoreMarkers: false,
+};
+```
+
+关闭后仍会在 dev 结束时恢复占位符，但恢复会按注入值本身匹配，dev 期间手写的相同值也可能被一起还原。
+
 ## 项目结构
 
 ```text

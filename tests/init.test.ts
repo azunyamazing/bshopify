@@ -87,6 +87,7 @@ describe("initProject", () => {
     expect(runnerConfig).toContain("// bshopify runner config");
     expect(runnerConfig).toContain("// Shopify app config files by environment.");
     expect(runnerConfig).toContain("extensionsRoot");
+    expect(runnerConfig).toContain("restoreMarkers: true");
     await expect(readFile(join(cwd, ".gitignore"), "utf8")).resolves.toContain(
       ".bshopify-tmp/",
     );

@@ -35,7 +35,9 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
 
   try {
     for (const plan of plans) {
-      await applyInjections(cwd, plan, transaction);
+      await applyInjections(cwd, plan, transaction, {
+        restoreMarkers: config.restoreMarkers,
+      });
     }
 
     if (config.failOnUnresolvedPlaceholders) {

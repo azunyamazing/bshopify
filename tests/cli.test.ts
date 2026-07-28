@@ -633,6 +633,28 @@ describe("devProject", () => {
     }
   });
 
+  it("can disable restore markers from runner config", async () => {
+    const cwd = await createDevProject();
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      "export default { restoreMarkers: false };\n",
+    );
+    const runShopifyCommand = vi.fn(async () => {
+      const current = await readFile(targetPath, "utf8");
+
+      expect(current).toContain('/apps/fixture-dev');
+      expect(current).not.toContain("bshopify-restore:");
+      return 0;
+    });
+
+    await devProject({ cwd, runShopifyCommand });
+
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(
+      '<div data-api-base="__SHOPIFY_APP_PROXY_BASE__"></div>\n',
+    );
+  });
+
   it("fails before Shopify dev when Liquid placeholders remain unresolved", async () => {
     const cwd = await createDevProject();
     const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");

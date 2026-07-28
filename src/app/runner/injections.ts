@@ -10,10 +10,15 @@ import type { FileTransaction, PreparedExtensionPlan } from "./types";
 const restoreMarkerPrefix = "bshopify-restore";
 const unresolvedPlaceholderPattern = /__[A-Z0-9_]+__/g;
 
+export interface ApplyInjectionsOptions {
+  restoreMarkers: boolean;
+}
+
 export async function applyInjections(
   cwd: string,
   plan: PreparedExtensionPlan,
   transaction: FileTransaction,
+  options: ApplyInjectionsOptions,
 ): Promise<void> {
   for (const injection of plan.injections) {
     if (injection.strategy !== "replace") {
@@ -41,9 +46,11 @@ export async function applyInjections(
       );
     }
 
-    const marker = createFileMarker(targetPath, `${restoreMarkerPrefix}:${randomUUID()}`);
+    const marker = options.restoreMarkers
+      ? createFileMarker(targetPath, `${restoreMarkerPrefix}:${randomUUID()}`)
+      : undefined;
 
-    await transaction.writeFile(targetPath, source.replace(pattern, `${value}${marker}`), {
+    await transaction.writeFile(targetPath, source.replace(pattern, `${value}${marker ?? ""}`), {
       marker,
       pattern,
       value,

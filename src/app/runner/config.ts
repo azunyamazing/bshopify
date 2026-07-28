@@ -17,6 +17,7 @@ export const defaultRunnerConfig: RunnerConfig = {
   entryFileName: "__entry.js",
   extensionsRoot: "extensions",
   failOnUnresolvedPlaceholders: true,
+  restoreMarkers: true,
   tmpRoot: ".bshopify-tmp",
 };
 
@@ -39,6 +40,10 @@ export async function loadRunnerConfig(cwd: string): Promise<RunnerConfig> {
       typeof loaded.failOnUnresolvedPlaceholders === "boolean"
         ? loaded.failOnUnresolvedPlaceholders
         : defaultRunnerConfig.failOnUnresolvedPlaceholders,
+    restoreMarkers:
+      typeof loaded.restoreMarkers === "boolean"
+        ? loaded.restoreMarkers
+        : defaultRunnerConfig.restoreMarkers,
     tmpRoot: toNonEmptyString(loaded.tmpRoot, defaultRunnerConfig.tmpRoot),
   };
 }

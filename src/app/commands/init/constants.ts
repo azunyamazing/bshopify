@@ -35,6 +35,10 @@ export default {
   // Fail when an injection plan leaves template placeholders unresolved.
   failOnUnresolvedPlaceholders: true,
 
+  // Add file-type-aware restore comments during dev so cleanup only reverts injected values.
+  // Set to false as an escape hatch if a target file type cannot safely contain comments.
+  restoreMarkers: true,
+
   // Hide extension entry files before deploy so they are not shipped.
   hideEntryBeforeDeploy: true,
 };

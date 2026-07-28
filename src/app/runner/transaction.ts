@@ -12,9 +12,12 @@ export async function createFileTransaction(): Promise<FileTransaction> {
         let content = await readFile(file.path, "utf8");
 
         for (const replacement of file.replacements.slice().reverse()) {
-          content = content
-            .split(`${replacement.value}${replacement.marker}`)
-            .join(replacement.pattern);
+          const restoreTarget =
+            replacement.marker === undefined
+              ? replacement.value
+              : `${replacement.value}${replacement.marker}`;
+
+          content = content.split(restoreTarget).join(replacement.pattern);
         }
 
         await writeFile(file.path, content);
