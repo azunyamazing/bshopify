@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { loadRunnerConfig } from "#/app/runner/config";
 import { createRunnerContext } from "#/app/runner/context";
 import {
@@ -9,10 +10,16 @@ import {
 import {
   applyInjections,
   assertNoUnresolvedPlaceholders,
+  formatAppliedInjections,
 } from "#/app/runner/injections";
 import { acquireLock } from "#/app/runner/lock";
 import { runShopifyCommand as runDefaultShopifyCommand } from "#/app/runner/shopify";
-import { createFileTransaction } from "#/app/runner/transaction";
+import {
+  createFileTransaction,
+  restoreFileTransactionJournal,
+} from "#/app/runner/transaction";
+import { ansi, colorize } from "#/utils/output";
+import type { AppliedInjection } from "#/app/runner/injections";
 import type { DevOptions, ExtensionContext, ShopifyCommandRunner } from "#/app/runner/types";
 
 export async function devProject(options: DevOptions = {}): Promise<number> {
@@ -31,35 +38,65 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
   await validatePlans(context, plans);
 
   const lock = await acquireLock(cwd, config.tmpRoot);
-  const transaction = await createFileTransaction();
+  const transactionPath = join(cwd, config.tmpRoot, "extension-prepare.transaction.json");
 
   try {
-    for (const plan of plans) {
-      await applyInjections(cwd, plan, transaction, {
-        restoreMarkers: config.restoreMarkers,
-      });
+    if (lock.recoveredStaleLock) {
+      const restored = await restoreFileTransactionJournal(transactionPath);
+      console.warn(
+        restored
+          ? "Detected a stale Shopify extension prepare lock, likely from a killed dev process. Restored previous injections and cleaned it automatically."
+          : "Detected a stale Shopify extension prepare lock, likely from a killed dev process. Cleaned it automatically.",
+      );
     }
 
-    if (config.failOnUnresolvedPlaceholders) {
-      await assertNoUnresolvedPlaceholders(cwd, config.extensionsRoot);
-    }
+    const transaction = await createFileTransaction(transactionPath);
+    const appliedInjections: AppliedInjection[] = [];
 
-    const runShopifyCommand =
-      options.runShopifyCommand ?? ((args) => runDefaultShopifyCommand(args, cwd));
-    const exitCode = await runShopifyCommand([
-      "app",
-      "dev",
-      "--config",
-      configName,
-      ...(options.shopifyArgs ?? []),
-    ]);
-
-    return exitCode ?? 0;
-  } finally {
     try {
-      await transaction.restore();
+      for (const plan of plans) {
+        appliedInjections.push(
+          ...(await applyInjections(cwd, plan, transaction, {
+            restoreMarkers: config.restoreMarkers,
+          })),
+        );
+      }
+
+      const injectionSummary = formatAppliedInjections(appliedInjections, {
+        configName,
+        cwd,
+      });
+
+      if (injectionSummary !== undefined) {
+        console.log(injectionSummary);
+      }
+
+      if (config.failOnUnresolvedPlaceholders) {
+        await assertNoUnresolvedPlaceholders(cwd, config.extensionsRoot);
+      }
+
+      const runShopifyCommand =
+        options.runShopifyCommand ?? ((args) => runDefaultShopifyCommand(args, cwd));
+      const exitCode = await runShopifyCommand([
+        "app",
+        "dev",
+        "--config",
+        configName,
+        ...(options.shopifyArgs ?? []),
+      ]);
+
+      return exitCode ?? 0;
     } finally {
-      await lock.release();
+      await transaction.restore();
+      if (appliedInjections.length > 0) {
+        console.log(formatRestoreNotice());
+      }
     }
+  } finally {
+    await lock.release();
   }
+}
+
+function formatRestoreNotice(): string {
+  return `\n${colorize(colorize("Dev extension files restored.", ansi.cyan), ansi.bold)}\n`;
 }

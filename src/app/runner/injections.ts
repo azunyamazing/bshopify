@@ -5,6 +5,7 @@ import { resolveExtensionPath } from "#/app/utils/extensions";
 import { findFilesByExtension } from "#/utils/files";
 import { createFileMarker } from "#/utils/markers";
 import { formatPath } from "#/utils/paths";
+import { ansi, colorize } from "#/utils/output";
 import type { FileTransaction, PreparedExtensionPlan } from "./types";
 
 const restoreMarkerPrefix = "bshopify-restore";
@@ -14,12 +15,30 @@ export interface ApplyInjectionsOptions {
   restoreMarkers: boolean;
 }
 
+export interface AppliedInjection {
+  path: string;
+  pattern: string;
+  value: string;
+}
+
+export interface FormatAppliedInjectionsOptions {
+  configName: string;
+  cwd: string;
+}
+
+interface AppliedInjectionGroup {
+  injections: AppliedInjection[];
+  path: string;
+}
+
 export async function applyInjections(
   cwd: string,
   plan: PreparedExtensionPlan,
   transaction: FileTransaction,
   options: ApplyInjectionsOptions,
-): Promise<void> {
+): Promise<AppliedInjection[]> {
+  const applied: AppliedInjection[] = [];
+
   for (const injection of plan.injections) {
     if (injection.strategy !== "replace") {
       throw new Error(`Unsupported injection strategy: ${injection.strategy}`);
@@ -55,7 +74,57 @@ export async function applyInjections(
       pattern,
       value,
     });
+    applied.push({
+      path: targetPath,
+      pattern,
+      value,
+    });
   }
+
+  return applied;
+}
+
+export function formatAppliedInjections(
+  applied: AppliedInjection[],
+  options: FormatAppliedInjectionsOptions,
+): string | undefined {
+  if (applied.length === 0) {
+    return undefined;
+  }
+
+  return [
+    "",
+    colorize(colorize("Dev extension injections", ansi.cyan), ansi.bold),
+    `${colorize("Reason:", ansi.gray)} temporary values for shopify app dev --config ${options.configName}; restored when dev exits.`,
+    "",
+    ...groupAppliedInjections(applied).flatMap((group, index) => [
+      ...(index > 0 ? [""] : []),
+      `${colorize(formatPath(options.cwd, group.path), ansi.cyan)}:`,
+      ...group.injections.map(
+        (injection) =>
+          `    ${colorize(injection.pattern, ansi.yellow)} ${colorize("->", ansi.gray)} ${colorize(
+            injection.value,
+            ansi.magenta,
+          )}`,
+      ),
+    ]),
+    "",
+  ].join("\n");
+}
+
+function groupAppliedInjections(applied: AppliedInjection[]): AppliedInjectionGroup[] {
+  const groups = new Map<string, AppliedInjectionGroup>();
+
+  for (const injection of applied) {
+    const group = groups.get(injection.path) ?? {
+      injections: [],
+      path: injection.path,
+    };
+    group.injections.push(injection);
+    groups.set(injection.path, group);
+  }
+
+  return [...groups.values()];
 }
 
 export async function assertNoUnresolvedPlaceholders(

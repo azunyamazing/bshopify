@@ -1,33 +1,122 @@
-import { readFile, writeFile } from "node:fs/promises";
-import type { FileTransaction, TrackedFile } from "./types";
+import { readFile, rm, writeFile } from "node:fs/promises";
+import { isRecord } from "#/utils/objects";
+import { isNodeError } from "#/utils/node";
+import type { FileTransaction, ReverseReplacement, TrackedFile } from "./types";
 
-export async function createFileTransaction(): Promise<FileTransaction> {
+interface FileTransactionJournal {
+  files: TrackedFile[];
+}
+
+export async function createFileTransaction(journalPath?: string): Promise<FileTransaction> {
   const tracked = new Map<string, TrackedFile>();
 
   return {
     async restore() {
-      const files = [...tracked.values()].reverse();
+      await restoreTrackedFiles([...tracked.values()]);
 
-      for (const file of files) {
-        let content = await readFile(file.path, "utf8");
-
-        for (const replacement of file.replacements.slice().reverse()) {
-          const restoreTarget =
-            replacement.marker === undefined
-              ? replacement.value
-              : `${replacement.value}${replacement.marker}`;
-
-          content = content.split(restoreTarget).join(replacement.pattern);
-        }
-
-        await writeFile(file.path, content);
+      if (journalPath !== undefined) {
+        await rm(journalPath, { force: true });
       }
     },
     async writeFile(path, content, replacement) {
       const trackedFile = tracked.get(path) ?? { path, replacements: [] };
       trackedFile.replacements.push(replacement);
       tracked.set(path, trackedFile);
+      await writeJournal(journalPath, [...tracked.values()]);
       await writeFile(path, content);
     },
+  };
+}
+
+export async function restoreFileTransactionJournal(journalPath: string): Promise<boolean> {
+  const journal = await readJournal(journalPath);
+
+  if (journal === undefined) {
+    return false;
+  }
+
+  await restoreTrackedFiles(journal.files);
+  await rm(journalPath, { force: true });
+  return true;
+}
+
+async function restoreTrackedFiles(files: TrackedFile[]): Promise<void> {
+  for (const file of files.slice().reverse()) {
+    let content = await readFile(file.path, "utf8");
+
+    for (const replacement of file.replacements.slice().reverse()) {
+      const restoreTarget =
+        replacement.marker === undefined
+          ? replacement.value
+          : `${replacement.value}${replacement.marker}`;
+
+      content = content.split(restoreTarget).join(replacement.pattern);
+    }
+
+    await writeFile(file.path, content);
+  }
+}
+
+async function writeJournal(
+  journalPath: string | undefined,
+  files: TrackedFile[],
+): Promise<void> {
+  if (journalPath === undefined) {
+    return;
+  }
+
+  const journal: FileTransactionJournal = { files };
+  await writeFile(journalPath, `${JSON.stringify(journal, undefined, 2)}\n`);
+}
+
+async function readJournal(journalPath: string): Promise<FileTransactionJournal | undefined> {
+  let content;
+
+  try {
+    content = await readFile(journalPath, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return undefined;
+    }
+
+    throw error;
+  }
+
+  const value = JSON.parse(content) as unknown;
+
+  if (!isRecord(value) || !Array.isArray(value.files)) {
+    throw new Error("Invalid bshopify dev transaction journal.");
+  }
+
+  return {
+    files: value.files.map(parseTrackedFile),
+  };
+}
+
+function parseTrackedFile(value: unknown): TrackedFile {
+  if (!isRecord(value) || typeof value.path !== "string" || !Array.isArray(value.replacements)) {
+    throw new Error("Invalid bshopify dev transaction journal.");
+  }
+
+  return {
+    path: value.path,
+    replacements: value.replacements.map(parseReverseReplacement),
+  };
+}
+
+function parseReverseReplacement(value: unknown): ReverseReplacement {
+  if (
+    !isRecord(value) ||
+    typeof value.pattern !== "string" ||
+    typeof value.value !== "string" ||
+    (value.marker !== undefined && typeof value.marker !== "string")
+  ) {
+    throw new Error("Invalid bshopify dev transaction journal.");
+  }
+
+  return {
+    marker: value.marker,
+    pattern: value.pattern,
+    value: value.value,
   };
 }

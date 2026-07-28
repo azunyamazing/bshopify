@@ -12,6 +12,7 @@ export const ansi = {
   cyan: ["\u001B[36m", "\u001B[39m"],
   gray: ["\u001B[90m", "\u001B[39m"],
   green: ["\u001B[32m", "\u001B[39m"],
+  magenta: ["\u001B[35m", "\u001B[39m"],
   red: ["\u001B[31m", "\u001B[39m"],
   yellow: ["\u001B[33m", "\u001B[39m"],
 } satisfies Record<string, AnsiPair>;

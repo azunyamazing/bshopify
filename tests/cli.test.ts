@@ -534,6 +534,163 @@ describe("devProject", () => {
     expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "test"]);
   });
 
+  it("prints the dev placeholder injection details with color", async () => {
+    const cwd = await createDevProject();
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    await writeFile(
+      targetPath,
+      [
+        '<div data-api-base="__SHOPIFY_APP_PROXY_BASE__">',
+        '  <span data-env="__SHOPIFY_CONFIG_NAME__"></span>',
+        "</div>",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      [
+        "export default {",
+        "  async prepare(ctx) {",
+        "    return {",
+        "      extension: ctx.extension.name,",
+        "      injections: [",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
+        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "        },",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__SHOPIFY_CONFIG_NAME__",',
+        "          value: ctx.extensionEnv.SHOPIFY_CONFIG_NAME,",
+        "        },",
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => 0);
+    let output = "";
+
+    try {
+      await devProject({ cwd, runShopifyCommand });
+      output = log.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(output).toContain("\u001B[1m\u001B[36mDev extension injections\u001B[39m\u001B[22m");
+    expect(output).toContain(
+      "\u001B[90mReason:\u001B[39m temporary values for shopify app dev --config dev; restored when dev exits.",
+    );
+    expect(output).toContain(
+      [
+        "\u001B[90mReason:\u001B[39m temporary values for shopify app dev --config dev; restored when dev exits.",
+        "",
+        "\u001B[36mextensions/theme-extension/blocks/app-embed.liquid\u001B[39m:",
+        "    \u001B[33m__SHOPIFY_APP_PROXY_BASE__\u001B[39m \u001B[90m->\u001B[39m \u001B[35m/apps/fixture-dev\u001B[39m",
+        "    \u001B[33m__SHOPIFY_CONFIG_NAME__\u001B[39m \u001B[90m->\u001B[39m \u001B[35mdev\u001B[39m",
+      ].join("\n"),
+    );
+    expect(output.endsWith("\n")).toBe(true);
+  });
+
+  it("prints a restore notice with surrounding blank lines when dev exits", async () => {
+    const cwd = await createDevProject();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => 0);
+    let restoreOutput = "";
+
+    try {
+      await devProject({ cwd, runShopifyCommand });
+      restoreOutput = String(log.mock.calls.at(-1)?.[0] ?? "");
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(restoreOutput).toBe(
+      "\n\u001B[1m\u001B[36mDev extension files restored.\u001B[39m\u001B[22m\n",
+    );
+  });
+
+  it("cleans a stale dev lock before preparing extensions", async () => {
+    const cwd = await createDevProject();
+    await mkdir(join(cwd, ".bshopify-tmp"), { recursive: true });
+    await writeFile(join(cwd, ".bshopify-tmp", "extension-prepare.lock"), "999999999\n");
+    const runShopifyCommand = vi.fn(async () => 0);
+
+    await devProject({ cwd, runShopifyCommand });
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "dev"]);
+    await expect(readFile(join(cwd, ".bshopify-tmp", "extension-prepare.lock"), "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("restores a stale dev transaction before preparing extensions", async () => {
+    const cwd = await createDevProject();
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    const marker = "{% comment %} bshopify-restore:stale {% endcomment %}";
+    const transactionPath = join(cwd, ".bshopify-tmp", "extension-prepare.transaction.json");
+    await mkdir(join(cwd, ".bshopify-tmp"), { recursive: true });
+    await writeFile(join(cwd, ".bshopify-tmp", "extension-prepare.lock"), "999999999\n");
+    await writeFile(
+      targetPath,
+      `<div data-api-base="/apps/fixture-dev${marker}"></div>\n`,
+    );
+    await writeFile(
+      transactionPath,
+      `${JSON.stringify({
+        files: [
+          {
+            path: targetPath,
+            replacements: [
+              {
+                marker,
+                pattern: "__SHOPIFY_APP_PROXY_BASE__",
+                value: "/apps/fixture-dev",
+              },
+            ],
+          },
+        ],
+      })}\n`,
+    );
+    const runShopifyCommand = vi.fn(async () => {
+      await expect(readFile(targetPath, "utf8")).resolves.toContain(
+        "/apps/fixture-dev",
+      );
+      return 0;
+    });
+
+    await devProject({ cwd, runShopifyCommand });
+
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(
+      '<div data-api-base="__SHOPIFY_APP_PROXY_BASE__"></div>\n',
+    );
+    await expect(readFile(transactionPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("releases the dev lock when stale transaction recovery fails", async () => {
+    const cwd = await createDevProject();
+    const lockPath = join(cwd, ".bshopify-tmp", "extension-prepare.lock");
+    await mkdir(join(cwd, ".bshopify-tmp"), { recursive: true });
+    await writeFile(lockPath, "999999999\n");
+    await writeFile(join(cwd, ".bshopify-tmp", "extension-prepare.transaction.json"), "{\n");
+
+    await expect(devProject({ cwd, runShopifyCommand: vi.fn(async () => 0) })).rejects.toThrow();
+
+    await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("restores only marker-wrapped injected values and keeps matching user edits", async () => {
     const cwd = await createDevProject();
     const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
