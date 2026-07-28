@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { formatInitResult, initProject } from "../src/index.js";
+import { formatInitResult, initProject } from "../src";
 
 const tempDirs: string[] = [];
 const execFileAsync = promisify(execFile);

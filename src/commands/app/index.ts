@@ -4,10 +4,12 @@ import {
   initProject,
   type InitOptions,
   type InitResult,
-} from "./init/index.js";
+} from "./init";
+import { devProject, type DevOptions, type ShopifyCommandRunner } from "./dev";
 
-export { formatInitResult, initProject };
-export type { InitCheck, InitOptions, InitResult } from "./init/index.js";
+interface DevCommandOptions {
+  cwd?: string;
+}
 
 interface InitCommandOptions {
   check?: boolean;
@@ -15,12 +17,14 @@ interface InitCommandOptions {
 }
 
 export interface AppCommandDependencies {
+  runDev?: (options?: DevOptions) => Promise<number | void>;
   initProject?: (options?: InitOptions) => Promise<InitResult>;
 }
 
-const localAppCommands = new Set(["guard", "init"]);
+const localAppCommands = new Set(["dev", "guard", "init"]);
 
 export function createAppCommand(dependencies: AppCommandDependencies = {}): Command {
+  const runDev = dependencies.runDev ?? devProject;
   const initializeProject = dependencies.initProject ?? initProject;
   const appCommand = new Command("app").description(
     "BestFulfill wrappers for Shopify app commands.",
@@ -42,11 +46,35 @@ export function createAppCommand(dependencies: AppCommandDependencies = {}): Com
     });
 
   appCommand
+    .command("dev")
+    .description("Run Shopify app dev with temporary extension config injection.")
+    .option("--cwd <path>", "project directory to run")
+    .allowUnknownOption(true)
+    .argument("[shopifyArgs...]", "extra arguments passed to Shopify CLI after --")
+    .action(async (shopifyArgs: string[], options: DevCommandOptions) => {
+      const exitCode = await runDev(toDevOptions(options, shopifyArgs));
+
+      if (typeof exitCode === "number") {
+        process.exitCode = exitCode;
+      }
+    });
+
+  appCommand
     .command("guard")
     .description("Prevent unsafe injected values or active locks from being committed.")
     .action(() => undefined);
 
   return appCommand;
+}
+
+function toDevOptions(
+  options: DevCommandOptions,
+  shopifyArgs: string[] | undefined,
+): DevOptions {
+  return {
+    cwd: options.cwd,
+    shopifyArgs: shopifyArgs ?? [],
+  };
 }
 
 export function shouldHandleAppCommandLocally(args: string[]): boolean {

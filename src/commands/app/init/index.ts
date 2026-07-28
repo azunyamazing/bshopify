@@ -25,14 +25,14 @@ import {
   requiredShopifyConfigFiles,
   runnerConfigTemplate,
   tmpRoot,
-} from "./constants.js";
+} from "./constants";
 import {
   formatChecks,
   formatSection,
   colorize,
   isNodeError,
   toPosixPath,
-} from "./utils.js";
+} from "./utils";
 
 export interface InitOptions {
   check?: boolean;
