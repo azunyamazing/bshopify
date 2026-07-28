@@ -90,17 +90,17 @@ node dist/cli.js --help
 | 命令 | 目标用途 |
 |-|-|
 | `bshopify app init` | 初始化项目接入文件、配置、Git hook、推荐 scripts 和 Extension Entry |
+| `bshopify app dev` | 临时注入 Extension Entry 产物，执行 `shopify app dev --config <name>`，结束后恢复占位符 |
 | `bshopify app guard` | 阻止真实注入值或持锁状态进入提交 |
 
 未被 bshopify 接管的命令会降级到 Shopify CLI，例如：
 
 ```bash
-bshopify app dev
 bshopify app deploy
 bshopify theme dev
 ```
 
-以上命令会分别执行对应的 `shopify app dev`、`shopify app deploy`、`shopify theme dev`。后续当 bshopify 接管某个命令时，会在保持 Shopify 命令格式的基础上增加注入、校验、恢复等编排。
+以上命令会分别执行对应的 `shopify app deploy`、`shopify theme dev`。后续当 bshopify 接管某个命令时，会在保持 Shopify 命令格式的基础上增加注入、校验、恢复等编排。
 
 ## init 命令
 
@@ -134,23 +134,43 @@ bshopify app init --check
 bshopify app init --cwd ./path/to/shopify-app
 ```
 
+## dev 命令
+
+默认使用 `shopify.app.dev.toml` 生成注入上下文，并执行 `shopify app dev --config dev`：
+
+```bash
+bshopify app dev
+```
+
+切换 Shopify app config 时，通过 bshopify 自己的 `--config` 参数指定，注入上下文和最终 Shopify CLI 参数会保持一致：
+
+```bash
+bshopify app dev --config test
+```
+
 ## 项目结构
 
 ```text
 src/
-  cli.ts        # bshopify bin 入口
-  index.ts      # CLI program 工厂与可测试导出
-  commands/
-    app/
-      index.ts    # app 命令聚合、子命令注册和 app 层 fallback 判断
-      init/
-        index.ts     # app init 命令实现
-        constants.ts # app init 常量、模板和推荐 scripts
-        utils.ts     # app init 工具方法
+  cli.ts           # bshopify bin 入口
+  main.ts          # CLI program 工厂、fallback 分发和 Shopify CLI 透传
+  index.ts         # package 对外导出面
+  utils/           # 根通用能力：配置读取、package.json、路径、文件、对象校验、终端输出等
+  app/
+    commands/      # app 域命令入口；负责参数解析、依赖注入和命令编排
+      index.ts     # app 子命令注册和 app 层 fallback 判断
+      dev/         # app dev 编排入口
+      init/        # app init 初始化流程，按 checks/files/git-hooks/paths/types 拆分
+    runner/        # app dev/deploy 可复用 runner 能力：上下文、配置、entries、注入、锁、事务、Shopify CLI 调用
+    utils/         # app 域共享工具，例如 Extension 路径处理
 tests/
-  cli.test.ts   # CLI 元信息、app init 命令面和 Shopify fallback 测试
-  init.test.ts  # init 文件生成和 check 行为测试
+  cli.test.ts      # CLI 元信息、命令面、fallback、目录结构和 dev 行为测试
+  init.test.ts     # init 文件生成和 check 行为测试
 ```
+
+目录边界上，根 `src/utils/` 只放与 Shopify app 域无关的通用能力；`src/app/utils/` 放 app 域内多个模块会共用的方法；具体命令目录只保留该命令自己的编排和局部细节。
+
+跨层级引用优先使用 `#/*` 路径别名，例如 `#/utils/node`、`#/app/runner/config`；同目录或相邻模块可以继续使用相对路径。
 
 ## 验证
 
@@ -161,4 +181,4 @@ npm run check
 npm pack --dry-run
 ```
 
-`npm run check` 会依次执行 TypeScript 类型检查、Vitest 测试和 tsup 构建。`npm pack --dry-run` 用于确认发布包内容符合预期。
+`npm run check` 会依次执行 TypeScript 类型检查、Vitest 测试、tsup 构建和构建产物 CLI smoke test。`npm pack --dry-run` 用于确认发布包内容符合预期。

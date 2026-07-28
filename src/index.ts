@@ -1,9 +1,9 @@
 export { createCliProgram, runCli, runShopifyCommand } from "./main";
-export { packageInfo } from "./package-info";
-export { devProject } from "./commands/app/dev";
-export { formatInitResult, initProject } from "./commands/app/init";
+export { packageInfo } from "./utils/package-json";
+export { devProject } from "./app/commands/dev";
+export { formatInitResult, initProject } from "./app/commands/init";
 
 export type { CliDependencies, ProcessRunner, ShopifyCommandRunner } from "./main";
-export type { PackageInfo } from "./package-info";
-export type { DevOptions } from "./commands/app/dev";
-export type { InitCheck, InitOptions, InitResult } from "./commands/app/init";
+export type { PackageInfo } from "./utils/package-json";
+export type { DevOptions } from "./app/runner/types";
+export type { InitCheck, InitOptions, InitResult } from "./app/commands/init/types";

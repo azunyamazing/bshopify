@@ -2,12 +2,13 @@ import { Command } from "commander";
 import {
   formatInitResult,
   initProject,
-  type InitOptions,
-  type InitResult,
 } from "./init";
-import { devProject, type DevOptions, type ShopifyCommandRunner } from "./dev";
+import { devProject } from "./dev";
+import type { InitOptions, InitResult } from "./init/types";
+import type { DevOptions } from "../runner/types";
 
 interface DevCommandOptions {
+  config?: string;
   cwd?: string;
 }
 
@@ -48,6 +49,7 @@ export function createAppCommand(dependencies: AppCommandDependencies = {}): Com
   appCommand
     .command("dev")
     .description("Run Shopify app dev with temporary extension config injection.")
+    .option("--config <name>", "Shopify app config name to run", "dev")
     .option("--cwd <path>", "project directory to run")
     .allowUnknownOption(true)
     .argument("[shopifyArgs...]", "extra arguments passed to Shopify CLI after --")
@@ -72,6 +74,7 @@ function toDevOptions(
   shopifyArgs: string[] | undefined,
 ): DevOptions {
   return {
+    configName: options.config,
     cwd: options.cwd,
     shopifyArgs: shopifyArgs ?? [],
   };

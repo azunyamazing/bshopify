@@ -1,12 +1,12 @@
-import { sep } from "node:path";
+type AnsiPair = readonly [string, string];
 
-interface FormattableCheck {
-  message: string;
-  name: string;
-  ok: boolean;
+export interface SectionStyle {
+  color: AnsiPair;
+  prefix: string;
+  title: string;
 }
 
-const ansi = {
+export const ansi = {
   bold: ["\u001B[1m", "\u001B[22m"],
   blue: ["\u001B[34m", "\u001B[39m"],
   cyan: ["\u001B[36m", "\u001B[39m"],
@@ -14,27 +14,10 @@ const ansi = {
   green: ["\u001B[32m", "\u001B[39m"],
   red: ["\u001B[31m", "\u001B[39m"],
   yellow: ["\u001B[33m", "\u001B[39m"],
-};
+} satisfies Record<string, AnsiPair>;
 
-interface SectionStyle {
-  color: string[];
-  prefix: string;
-  title: string;
-}
-
-export function formatChecks(checks: FormattableCheck[]): string[] {
-  if (checks.length === 0) {
-    return [];
-  }
-
-  return [
-    "",
-    colorize(colorize("Checks", ansi.blue), ansi.bold),
-    ...checks.map(
-      (check) =>
-        `  ${colorize(check.ok ? "ok" : "missing", check.ok ? ansi.green : ansi.red)} ${check.name}`,
-    ),
-  ];
+export function colorize(value: string, color: AnsiPair): string {
+  return `${color[0]}${value}${color[1]}`;
 }
 
 export function formatSection(label: string, items: string[]): string[] {
@@ -49,18 +32,6 @@ export function formatSection(label: string, items: string[]): string[] {
     colorize(colorize(sectionStyle.title, sectionStyle.color), ansi.bold),
     ...items.map((item) => `  ${colorize(sectionStyle.prefix, sectionStyle.color)} ${item}`),
   ];
-}
-
-export function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}
-
-export function toPosixPath(path: string): string {
-  return path.split(sep).join("/");
-}
-
-export function colorize(value: string, color: string[]): string {
-  return `${color[0]}${value}${color[1]}`;
 }
 
 function getSectionStyle(label: string): SectionStyle {

@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAppCommand } from "../src/commands/app";
+import { createAppCommand } from "../src/app/commands";
 import {
   createCliProgram,
   devProject,
@@ -21,6 +21,19 @@ import {
 
 interface CommandWithRuntimeHiddenFlag {
   _hidden?: boolean;
+}
+
+interface PackageJsonFixture {
+  name: string;
+  scripts: Record<string, string>;
+  version: string;
+}
+
+interface TsConfigFixture {
+  compilerOptions?: {
+    baseUrl?: string;
+    paths?: Record<string, string[]>;
+  };
 }
 
 const tempDirs: string[] = [];
@@ -119,7 +132,14 @@ describe("bshopify CLI", () => {
   it("reads package metadata from package.json", async () => {
     const packageJson = JSON.parse(
       await readFile(join(process.cwd(), "package.json"), "utf8"),
-    ) as { name: string; version: string };
+    ) as PackageJsonFixture;
+    const rootIndex = await readFile(join(process.cwd(), "src", "index.ts"), "utf8");
+    const mainSource = await readFile(join(process.cwd(), "src", "main.ts"), "utf8");
+    const packageJsonSource = await readFile(
+      join(process.cwd(), "src", "utils", "package-json.ts"),
+      "utf8",
+    );
+    const tsupConfig = await readFile(join(process.cwd(), "tsup.config.ts"), "utf8");
     const sourceFiles = await readSourceFiles(join(process.cwd(), "src"));
     const hardcodedPackageInfo = sourceFiles
       .filter((file) => file.content.includes(`version: "${packageJson.version}"`))
@@ -129,6 +149,19 @@ describe("bshopify CLI", () => {
       name: packageJson.name,
       version: packageJson.version,
     });
+    await expect(stat(join(process.cwd(), "src", "package-info.ts"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(rootIndex).toContain('export { packageInfo } from "./utils/package-json";');
+    expect(rootIndex).toContain('export type { PackageInfo } from "./utils/package-json";');
+    expect(mainSource).toContain('./utils/package-json');
+    expect(packageJsonSource).toContain("export const packageInfo");
+    expect(packageJsonSource).toContain("__BSHOPIFY_PACKAGE_NAME__");
+    expect(packageJsonSource).toContain("__BSHOPIFY_PACKAGE_VERSION__");
+    expect(tsupConfig).toContain("__BSHOPIFY_PACKAGE_NAME__");
+    expect(tsupConfig).toContain("__BSHOPIFY_PACKAGE_VERSION__");
+    expect(packageJson.scripts.check).toContain("npm run verify:dist");
+    expect(packageJson.scripts["verify:dist"]).toBe("node dist/cli.js --help");
     expect(hardcodedPackageInfo).toEqual([]);
   });
 
@@ -178,6 +211,27 @@ describe("bshopify CLI", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("uses source path aliases instead of deep relative imports", async () => {
+    const tsconfig = JSON.parse(
+      await readFile(join(process.cwd(), "tsconfig.json"), "utf8"),
+    ) as TsConfigFixture;
+    const vitestConfig = await readFile(
+      join(process.cwd(), "vitest.config.ts"),
+      "utf8",
+    );
+    const sourceFiles = await readSourceFiles(join(process.cwd(), "src"));
+    const deepRelativeImportPattern =
+      /(?:from\s+["']|import\(["'])\.\.\/\.\.\/(?:[^"']*)["']/;
+    const offenders = sourceFiles
+      .filter((file) => deepRelativeImportPattern.test(file.content))
+      .map((file) => file.path);
+
+    expect(tsconfig.compilerOptions?.baseUrl).toBe(".");
+    expect(tsconfig.compilerOptions?.paths?.["#/*"]).toEqual(["src/*"]);
+    expect(vitestConfig).toContain('find: "#"');
+    expect(offenders).toEqual([]);
+  });
+
   it("uses root index.ts as the only explicit public re-export surface", async () => {
     const sourceFiles = await readSourceFiles(join(process.cwd(), "src"));
     const wildcardExportPattern = /export\s+\*\s+from\s+["'][^"']+["']/;
@@ -199,10 +253,13 @@ describe("bshopify CLI", () => {
       code: "ENOENT",
     });
     expect(rootIndex).toContain('export { createCliProgram, runCli, runShopifyCommand } from "./main";');
-    expect(rootIndex).toContain('export { packageInfo } from "./package-info";');
-    expect(rootIndex).toContain('export { devProject } from "./commands/app/dev";');
-    expect(rootIndex).toContain('export { formatInitResult, initProject } from "./commands/app/init";');
+    expect(rootIndex).toContain('export { packageInfo } from "./utils/package-json";');
+    expect(rootIndex).toContain('export { devProject } from "./app/commands/dev";');
+    expect(rootIndex).toContain('export { formatInitResult, initProject } from "./app/commands/init";');
     expect(rootIndex).toContain('export type { CliDependencies, ProcessRunner, ShopifyCommandRunner } from "./main";');
+    expect(rootIndex).toContain('export type { PackageInfo } from "./utils/package-json";');
+    expect(rootIndex).toContain('export type { DevOptions } from "./app/runner/types";');
+    expect(rootIndex).toContain('export type { InitCheck, InitOptions, InitResult } from "./app/commands/init/types";');
     expect(wildcardOffenders).toEqual([]);
     expect(offenders).toEqual([]);
   });
@@ -215,6 +272,80 @@ describe("bshopify CLI", () => {
 
     await expect(stat(join(process.cwd(), "src", "main.ts"))).resolves.toBeTruthy();
     expect(cliProgramReferences).toEqual([]);
+  });
+
+  it("keeps reusable app runner modules above concrete commands", async () => {
+    const rootUtilsSourceFiles = await readSourceFiles(
+      join(process.cwd(), "src", "utils"),
+    );
+    const appUtilsSourceFiles = await readSourceFiles(
+      join(process.cwd(), "src", "app", "utils"),
+    );
+    const runnerSourceFiles = await readSourceFiles(
+      join(process.cwd(), "src", "app", "runner"),
+    );
+    const devSourceFiles = await readSourceFiles(
+      join(process.cwd(), "src", "app", "commands", "dev"),
+    );
+    const initSourceFiles = await readSourceFiles(
+      join(process.cwd(), "src", "app", "commands", "init"),
+    );
+    const oversizedFiles = [
+      ...rootUtilsSourceFiles,
+      ...appUtilsSourceFiles,
+      ...runnerSourceFiles,
+      ...devSourceFiles,
+      ...initSourceFiles,
+    ]
+      .filter((file) => file.content.split(/\r?\n/).length > 250)
+      .map((file) => file.path);
+    expect(rootUtilsSourceFiles.map((file) => file.path).sort()).toEqual(
+      expect.arrayContaining([
+        join(process.cwd(), "src", "utils", "config.ts"),
+        join(process.cwd(), "src", "utils", "files.ts"),
+        join(process.cwd(), "src", "utils", "node.ts"),
+        join(process.cwd(), "src", "utils", "objects.ts"),
+        join(process.cwd(), "src", "utils", "output.ts"),
+        join(process.cwd(), "src", "utils", "package-json.ts"),
+        join(process.cwd(), "src", "utils", "markers.ts"),
+        join(process.cwd(), "src", "utils", "paths.ts"),
+      ]),
+    );
+    expect(appUtilsSourceFiles.map((file) => file.path).sort()).toEqual([
+      join(process.cwd(), "src", "app", "utils", "extensions.ts"),
+    ]);
+    await expect(stat(join(process.cwd(), "src", "app", "runner", "utils.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(process.cwd(), "src", "app", "runner", "markers.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(process.cwd(), "src", "app", "utils.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+
+    expect(runnerSourceFiles.map((file) => file.path).sort()).toEqual(
+      expect.arrayContaining([
+        join(process.cwd(), "src", "app", "runner", "config.ts"),
+        join(process.cwd(), "src", "app", "runner", "context.ts"),
+        join(process.cwd(), "src", "app", "runner", "entries.ts"),
+        join(process.cwd(), "src", "app", "runner", "injections.ts"),
+        join(process.cwd(), "src", "app", "runner", "lock.ts"),
+        join(process.cwd(), "src", "app", "runner", "shopify.ts"),
+        join(process.cwd(), "src", "app", "runner", "transaction.ts"),
+        join(process.cwd(), "src", "app", "runner", "types.ts"),
+      ]),
+    );
+    expect(devSourceFiles.map((file) => file.path).sort()).toEqual([
+      join(process.cwd(), "src", "app", "commands", "dev", "index.ts"),
+    ]);
+    expect(initSourceFiles.map((file) => file.path).sort()).toEqual(
+      expect.arrayContaining([
+        join(process.cwd(), "src", "app", "commands", "init", "checks.ts"),
+        join(process.cwd(), "src", "app", "commands", "init", "constants.ts"),
+        join(process.cwd(), "src", "app", "commands", "init", "files.ts"),
+        join(process.cwd(), "src", "app", "commands", "init", "git-hooks.ts"),
+        join(process.cwd(), "src", "app", "commands", "init", "index.ts"),
+        join(process.cwd(), "src", "app", "commands", "init", "paths.ts"),
+        join(process.cwd(), "src", "app", "commands", "init", "types.ts"),
+        join(process.cwd(), "src", "app", "commands", "init", "utils.ts"),
+      ]),
+    );
+    expect(oversizedFiles).toEqual([]);
   });
 
   it("dispatches bshopify app init to the local initializer", async () => {
@@ -256,6 +387,30 @@ describe("bshopify CLI", () => {
     ]);
 
     expect(runDev).toHaveBeenCalledWith({
+      configName: "dev",
+      cwd: "/tmp/shopify-app",
+      shopifyArgs: ["--reset"],
+    });
+  });
+
+  it("dispatches bshopify app dev with a matching Shopify config", async () => {
+    const runDev = vi.fn(async () => 0);
+
+    await createCliProgram({ runDev }).parseAsync([
+      "node",
+      "bshopify",
+      "app",
+      "dev",
+      "--cwd",
+      "/tmp/shopify-app",
+      "--config",
+      "test",
+      "--",
+      "--reset",
+    ]);
+
+    expect(runDev).toHaveBeenCalledWith({
+      configName: "test",
       cwd: "/tmp/shopify-app",
       shopifyArgs: ["--reset"],
     });
@@ -330,11 +485,12 @@ describe("devProject", () => {
     const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
     const runShopifyCommand = vi.fn(async () => {
       await expect(readFile(targetPath, "utf8")).resolves.toContain(
-        'data-api-base="/apps/fixture-dev"',
+        "/apps/fixture-dev",
       );
+      const current = await readFile(targetPath, "utf8");
       await writeFile(
         targetPath,
-        '<div data-api-base="/apps/fixture-dev"></div>\n<p>edited during dev</p>\n',
+        `${current}<p>edited during dev</p>\n`,
       );
       return 0;
     });
@@ -349,6 +505,132 @@ describe("devProject", () => {
     });
     expect(exitCode).toBe(0);
     expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "dev"]);
+  });
+
+  it("uses the selected config for app dev context and Shopify CLI", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "shopify.app.test.toml"),
+      [
+        'name = "fixture"',
+        "",
+        "[app_proxy]",
+        'prefix = "apps"',
+        'subpath = "fixture-test"',
+        'url = "https://example.test/proxy"',
+        "",
+      ].join("\n"),
+    );
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    const runShopifyCommand = vi.fn(async () => {
+      await expect(readFile(targetPath, "utf8")).resolves.toContain(
+        "/apps/fixture-test",
+      );
+      return 0;
+    });
+
+    await devProject({ configName: "test", cwd, runShopifyCommand });
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "test"]);
+  });
+
+  it("restores only marker-wrapped injected values and keeps matching user edits", async () => {
+    const cwd = await createDevProject();
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    const runShopifyCommand = vi.fn(async () => {
+      const current = await readFile(targetPath, "utf8");
+      await writeFile(
+        targetPath,
+        [
+          current.trimEnd(),
+          '<p data-copy="/apps/fixture-dev">edited during dev</p>',
+          "",
+        ].join("\n"),
+      );
+      return 0;
+    });
+
+    await devProject({ cwd, runShopifyCommand });
+
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(
+      [
+        '<div data-api-base="__SHOPIFY_APP_PROXY_BASE__"></div>',
+        '<p data-copy="/apps/fixture-dev">edited during dev</p>',
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("uses restore markers that match the target file type", async () => {
+    const cwd = await createDevProject();
+    const extensionRoot = join(cwd, "extensions", "theme-extension");
+    const cases = [
+      {
+        file: "blocks/app-embed.liquid",
+        markerPattern: "{% comment %} bshopify-restore:",
+      },
+      {
+        file: "blocks/app-block.html",
+        markerPattern: "<!-- bshopify-restore:",
+      },
+      {
+        file: "assets/app.js",
+        markerPattern: "/* bshopify-restore:",
+      },
+      {
+        file: "assets/app.jsx",
+        markerPattern: "{/* bshopify-restore:",
+      },
+      {
+        file: "assets/app.tsx",
+        markerPattern: "{/* bshopify-restore:",
+      },
+      {
+        file: "assets/app.css",
+        markerPattern: "/* bshopify-restore:",
+      },
+    ];
+    await mkdir(join(extensionRoot, "assets"), { recursive: true });
+    await writeFile(
+      join(extensionRoot, "__entry.js"),
+      [
+        "export default {",
+        "  async prepare(ctx) {",
+        "    return {",
+        "      injections: [",
+        ...cases.map(
+          ({ file }) =>
+            `        { file: ${JSON.stringify(file)}, strategy: "replace", pattern: "__SHOPIFY_APP_PROXY_BASE__", value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE },`,
+        ),
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    for (const { file } of cases) {
+      await mkdir(join(extensionRoot, file, ".."), { recursive: true });
+      await writeFile(join(extensionRoot, file), "__SHOPIFY_APP_PROXY_BASE__\n");
+    }
+
+    const runShopifyCommand = vi.fn(async () => {
+      for (const { file, markerPattern } of cases) {
+        await expect(readFile(join(extensionRoot, file), "utf8")).resolves.toContain(
+          markerPattern,
+        );
+      }
+      return 0;
+    });
+
+    await devProject({ cwd, runShopifyCommand });
+
+    for (const { file } of cases) {
+      await expect(readFile(join(extensionRoot, file), "utf8")).resolves.toBe(
+        "__SHOPIFY_APP_PROXY_BASE__\n",
+      );
+    }
   });
 
   it("fails before Shopify dev when Liquid placeholders remain unresolved", async () => {

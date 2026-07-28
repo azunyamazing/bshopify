@@ -5,8 +5,8 @@ import {
   shouldHandleAppCommandLocally,
   shouldHandleAppHelpLocally,
   type AppCommandDependencies,
-} from "./commands/app";
-import { packageInfo } from "./package-info";
+} from "./app/commands";
+import { packageInfo } from "./utils/package-json";
 
 export type ShopifyCommandRunner = (args: string[]) => Promise<number | void>;
 export type ProcessRunner = (

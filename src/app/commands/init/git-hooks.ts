@@ -1,0 +1,141 @@
+import { execFile } from "node:child_process";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { promisify } from "node:util";
+import { isNodeError } from "#/utils/node";
+import {
+  legacyPreCommitGuardCommand,
+  legacyPreCommitGuardEndMarker,
+  legacyPreCommitGuardStartMarker,
+  preCommitGuardCommand,
+  preCommitGuardEndMarker,
+  preCommitGuardStartMarker,
+  preCommitHookTemplate,
+} from "./constants";
+import { resolveProjectPath, toDisplayPath } from "./paths";
+import type { InitResult } from "./types";
+
+const execFileAsync = promisify(execFile);
+
+interface GitHookPath {
+  absolutePath: string;
+  displayPath: string;
+}
+
+export async function writePreCommitHook(
+  cwd: string,
+  result: InitResult,
+): Promise<void> {
+  const hookPath = await resolveGitHookPath(cwd);
+
+  if (hookPath === undefined) {
+    result.warnings.push("git repository not found; pre-commit hook skipped");
+    return;
+  }
+
+  const created = await ensurePreCommitGuard(
+    hookPath.absolutePath,
+    hookPath.displayPath,
+    result,
+  );
+
+  if (created) {
+    await chmod(hookPath.absolutePath, 0o755);
+  }
+}
+
+async function ensurePreCommitGuard(
+  absolutePath: string,
+  displayPath: string,
+  result: InitResult,
+): Promise<boolean> {
+  let current = "";
+
+  try {
+    current = await readFile(absolutePath, "utf8");
+  } catch (error) {
+    if (!isNodeError(error) || error.code !== "ENOENT") {
+      throw error;
+    }
+
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(absolutePath, preCommitHookTemplate);
+    result.created.push(displayPath);
+    return true;
+  }
+
+  if (current.includes(preCommitGuardStartMarker)) {
+    result.skipped.push(displayPath);
+    return false;
+  }
+
+  const next = insertPreCommitGuardBlock(current);
+  await writeFile(absolutePath, next);
+  result.updated.push(displayPath);
+  return true;
+}
+
+function insertPreCommitGuardBlock(current: string): string {
+  const guardBlock = `${preCommitGuardStartMarker}\n${preCommitGuardCommand}\n${preCommitGuardEndMarker}`;
+  const lines = removeLegacyPreCommitGuardBlock(current.split("\n")).filter(
+    (line) => line.trim() !== legacyPreCommitGuardCommand,
+  );
+  const insertIndex = lines[0]?.startsWith("#!") ? 1 : 0;
+  lines.splice(insertIndex, 0, guardBlock);
+
+  return `${lines.join("\n")}${current.endsWith("\n") ? "" : "\n"}`;
+}
+
+function removeLegacyPreCommitGuardBlock(lines: string[]): string[] {
+  const next: string[] = [];
+  let isInsideLegacyGuardBlock = false;
+
+  for (const line of lines) {
+    if (line === legacyPreCommitGuardStartMarker) {
+      isInsideLegacyGuardBlock = true;
+      continue;
+    }
+
+    if (line === legacyPreCommitGuardEndMarker) {
+      isInsideLegacyGuardBlock = false;
+      continue;
+    }
+
+    if (!isInsideLegacyGuardBlock) {
+      next.push(line);
+    }
+  }
+
+  return next;
+}
+
+async function resolveGitHookPath(cwd: string): Promise<GitHookPath | undefined> {
+  const gitPath = await readGitPath(cwd, "hooks/pre-commit");
+
+  if (gitPath === undefined) {
+    return undefined;
+  }
+
+  const absolutePath = resolveProjectPath(cwd, gitPath);
+  await mkdir(dirname(absolutePath), { recursive: true });
+
+  return {
+    absolutePath,
+    displayPath: toDisplayPath(cwd, absolutePath),
+  };
+}
+
+async function readGitPath(cwd: string, path: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync("git", [
+      "-C",
+      cwd,
+      "rev-parse",
+      "--git-path",
+      path,
+    ]);
+    return stdout.trim();
+  } catch {
+    return undefined;
+  }
+}
