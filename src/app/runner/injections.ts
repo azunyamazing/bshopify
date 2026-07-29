@@ -12,6 +12,7 @@ const restoreMarkerPrefix = "bshopify-restore";
 const unresolvedPlaceholderPattern = /__[A-Z0-9_]+__/g;
 
 export interface ApplyInjectionsOptions {
+  mode?: "deploy" | "dev" | "dryRun";
   restoreMarkers: boolean;
 }
 
@@ -24,6 +25,7 @@ export interface AppliedInjection {
 export interface FormatAppliedInjectionsOptions {
   configName: string;
   cwd: string;
+  mode?: "deploy" | "dev" | "dryRun";
 }
 
 interface AppliedInjectionGroup {
@@ -38,6 +40,7 @@ export async function applyInjections(
   options: ApplyInjectionsOptions,
 ): Promise<AppliedInjection[]> {
   const applied: AppliedInjection[] = [];
+  const mode = options.mode ?? "dev";
 
   for (const injection of plan.injections) {
     if (injection.strategy !== "replace") {
@@ -53,7 +56,7 @@ export async function applyInjections(
     }
 
     if (!value.trim()) {
-      throw new Error(`${injection.pattern} has no value for dev.`);
+      throw new Error(`${injection.pattern} has no value for ${formatInjectionErrorMode(mode)}.`);
     }
 
     const source = await readFile(targetPath, "utf8");
@@ -84,6 +87,14 @@ export async function applyInjections(
   return applied;
 }
 
+function formatInjectionErrorMode(mode: "deploy" | "dev" | "dryRun"): string {
+  if (mode === "dryRun") {
+    return "deploy dry-run";
+  }
+
+  return mode;
+}
+
 export function formatAppliedInjections(
   applied: AppliedInjection[],
   options: FormatAppliedInjectionsOptions,
@@ -91,11 +102,12 @@ export function formatAppliedInjections(
   if (applied.length === 0) {
     return undefined;
   }
+  const mode = options.mode ?? "dev";
 
   return [
     "",
-    colorize(colorize("Dev extension injections", ansi.cyan), ansi.bold),
-    `${colorize("Reason:", ansi.gray)} temporary values for shopify app dev --config ${options.configName}; restored when dev exits.`,
+    colorize(colorize(formatInjectionTitle(mode), ansi.cyan), ansi.bold),
+    `${colorize("Reason:", ansi.gray)} ${formatInjectionReason(mode, options.configName)}`,
     "",
     ...groupAppliedInjections(applied).flatMap((group, index) => [
       ...(index > 0 ? [""] : []),
@@ -110,6 +122,30 @@ export function formatAppliedInjections(
     ]),
     "",
   ].join("\n");
+}
+
+function formatInjectionTitle(mode: "deploy" | "dev" | "dryRun"): string {
+  if (mode === "deploy") {
+    return "Deploy extension injections";
+  }
+
+  if (mode === "dryRun") {
+    return "Deploy dry-run extension injections";
+  }
+
+  return "Dev extension injections";
+}
+
+function formatInjectionReason(mode: "deploy" | "dev" | "dryRun", configName: string): string {
+  if (mode === "deploy") {
+    return `temporary values for shopify app deploy --config ${configName}; restored after deploy.`;
+  }
+
+  if (mode === "dryRun") {
+    return `temporary values for deploy dry-run --config ${configName}; restored after validation.`;
+  }
+
+  return `temporary values for shopify app dev --config ${configName}; restored when dev exits.`;
 }
 
 function groupAppliedInjections(applied: AppliedInjection[]): AppliedInjectionGroup[] {

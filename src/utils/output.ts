@@ -8,6 +8,8 @@ export interface SectionStyle {
 
 export const ansi = {
   bold: ["\u001B[1m", "\u001B[22m"],
+  bgCyan: ["\u001B[46m", "\u001B[49m"],
+  black: ["\u001B[30m", "\u001B[39m"],
   blue: ["\u001B[34m", "\u001B[39m"],
   cyan: ["\u001B[36m", "\u001B[39m"],
   gray: ["\u001B[90m", "\u001B[39m"],
@@ -33,6 +35,24 @@ export function formatSection(label: string, items: string[]): string[] {
     colorize(colorize(sectionStyle.title, sectionStyle.color), ansi.bold),
     ...items.map((item) => `  ${colorize(sectionStyle.prefix, sectionStyle.color)} ${item}`),
   ];
+}
+
+export function formatCliError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const lines = message
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  return [
+    "",
+    colorize(colorize("Error", ansi.red), ansi.bold),
+    "",
+    ...(lines.length > 0
+      ? lines.map((line) => colorize(`  ${line}`, ansi.red))
+      : [colorize("  Unknown error", ansi.red)]),
+    "",
+  ].join("\n");
 }
 
 function getSectionStyle(label: string): SectionStyle {

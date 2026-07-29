@@ -32,11 +32,6 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
     cwd,
     runnerConfig: config,
   });
-  const entries = await findExtensionEntries(cwd, config);
-  const hooks = await loadExtensionHooks(entries);
-  const plans = await preparePlans(context, hooks);
-  await validatePlans(context, plans);
-
   const lock = await acquireLock(cwd, config.tmpRoot);
   const transactionPath = join(cwd, config.tmpRoot, "extension-prepare.transaction.json");
 
@@ -50,6 +45,11 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       );
     }
 
+    const entries = await findExtensionEntries(cwd, config);
+    const hooks = await loadExtensionHooks(entries);
+    const plans = await preparePlans(context, hooks);
+    await validatePlans(context, plans);
+
     const transaction = await createFileTransaction(transactionPath);
     const appliedInjections: AppliedInjection[] = [];
 
@@ -57,6 +57,7 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       for (const plan of plans) {
         appliedInjections.push(
           ...(await applyInjections(cwd, plan, transaction, {
+            mode: "dev",
             restoreMarkers: config.restoreMarkers,
           })),
         );

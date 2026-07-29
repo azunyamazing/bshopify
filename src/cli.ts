@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { runCli } from "./main";
+import { formatCliError } from "./utils/output";
 
 runCli().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(message);
+  console.error(formatCliError(error));
   process.exitCode = 1;
 });

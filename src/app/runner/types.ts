@@ -7,6 +7,16 @@ export interface DevOptions {
   shopifyArgs?: string[];
 }
 
+export interface DeployOptions {
+  configName?: string;
+  confirmProduction?: boolean;
+  cwd?: string;
+  dryRun?: boolean;
+  runShopifyCommand?: ShopifyCommandRunner;
+  shopifyArgs?: string[];
+  yes?: boolean;
+}
+
 export interface RunnerConfig {
   configFiles: ConfigFileMap;
   entryFileName: string;
@@ -27,8 +37,10 @@ export interface ShopifyAppProxyConfig {
 }
 
 export interface ShopifyAppConfig {
-  app_proxy: ShopifyAppProxyConfig;
+  app_proxy?: ShopifyAppProxyConfig;
+  application_url?: string;
   client_id?: string;
+  importantConfig: ShopifyImportantConfigItem[];
   name?: string;
 }
 
@@ -39,20 +51,27 @@ export interface AppProxyContext {
   targetUrl: string;
 }
 
+export interface ShopifyImportantConfigItem {
+  label: string;
+  value: string;
+}
+
 export type RunnerCommand = "dev" | "deploy" | "dryRun";
 
 export interface ShopifyContext {
+  applicationUrl?: string;
   appName?: string;
   clientId?: string;
   configFile: string;
+  importantConfig: ShopifyImportantConfigItem[];
 }
 
 export interface ExtensionEnv {
   APP_ENV: string;
-  SHOPIFY_APP_PROXY_BASE: string;
-  SHOPIFY_APP_PROXY_PREFIX: string;
-  SHOPIFY_APP_PROXY_SUBPATH: string;
-  SHOPIFY_APP_PROXY_TARGET_URL: string;
+  SHOPIFY_APP_PROXY_BASE?: string;
+  SHOPIFY_APP_PROXY_PREFIX?: string;
+  SHOPIFY_APP_PROXY_SUBPATH?: string;
+  SHOPIFY_APP_PROXY_TARGET_URL?: string;
   SHOPIFY_CONFIG_NAME: string;
 }
 
@@ -62,7 +81,7 @@ export interface ExtensionInfo {
 }
 
 export interface ExtensionContext {
-  appProxy: AppProxyContext;
+  appProxy?: AppProxyContext;
   command: RunnerCommand;
   configName: string;
   env: string;
@@ -86,11 +105,27 @@ export interface ExtensionPlanResult {
 
 export interface ExtensionLifecycle {
   prepare(ctx: ExtensionContext): ExtensionPlanResult | Promise<ExtensionPlanResult>;
+  afterDeploy?(
+    ctx: ExtensionContext,
+    result: ExtensionDeployResult,
+  ): void | Promise<void>;
+  beforeDeploy?(
+    ctx: ExtensionContext,
+    plan: PreparedExtensionPlan,
+    plans: PreparedExtensionPlan[],
+  ): void | Promise<void>;
+  onError?(ctx: ExtensionContext, error: unknown): void | Promise<void>;
   validate?(
     ctx: ExtensionContext,
     plan: PreparedExtensionPlan,
     plans: PreparedExtensionPlan[],
   ): void | Promise<void>;
+}
+
+export interface ExtensionDeployResult {
+  deployed: boolean;
+  dryRun: boolean;
+  exitCode: number;
 }
 
 export interface ExtensionEntry {
@@ -106,7 +141,7 @@ export interface PreparedExtensionPlan {
 }
 
 export interface RunnerContextBase {
-  appProxy: AppProxyContext;
+  appProxy?: AppProxyContext;
   command: RunnerCommand;
   configName: string;
   env: string;
@@ -116,6 +151,7 @@ export interface RunnerContextBase {
 }
 
 export interface FileTransaction {
+  hideFile(path: string): Promise<void>;
   restore(): Promise<void>;
   writeFile(path: string, content: string, replacement: ReverseReplacement): Promise<void>;
 }
@@ -129,6 +165,11 @@ export interface ReverseReplacement {
 export interface TrackedFile {
   path: string;
   replacements: ReverseReplacement[];
+}
+
+export interface HiddenFile {
+  hiddenPath: string;
+  path: string;
 }
 
 export interface RuntimeConfig {

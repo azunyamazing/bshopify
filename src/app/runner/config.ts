@@ -6,7 +6,7 @@ import {
   toRequiredString,
   toStringRecord,
 } from "#/utils/objects";
-import type { RunnerConfig, ShopifyAppConfig } from "./types";
+import type { ShopifyImportantConfigItem, RunnerConfig, ShopifyAppConfig } from "./types";
 
 export const defaultRunnerConfig: RunnerConfig = {
   configFiles: {
@@ -60,17 +60,75 @@ function loadShopifyAppConfigRecord(value: unknown, displayPath: string): Shopif
     throw new Error(`${displayPath} must be a TOML object.`);
   }
 
-  if (!isRecord(value.app_proxy)) {
-    throw new Error(`${displayPath} must define [app_proxy].`);
-  }
+  const appProxy = isRecord(value.app_proxy)
+    ? {
+        prefix: toRequiredString(value.app_proxy.prefix, `${displayPath} [app_proxy].prefix`),
+        subpath: toRequiredString(value.app_proxy.subpath, `${displayPath} [app_proxy].subpath`),
+        url: toRequiredString(value.app_proxy.url, `${displayPath} [app_proxy].url`),
+      }
+    : undefined;
 
   return {
-    app_proxy: {
-      prefix: toRequiredString(value.app_proxy.prefix, `${displayPath} [app_proxy].prefix`),
-      subpath: toRequiredString(value.app_proxy.subpath, `${displayPath} [app_proxy].subpath`),
-      url: toRequiredString(value.app_proxy.url, `${displayPath} [app_proxy].url`),
-    },
+    app_proxy: appProxy,
+    application_url: typeof value.application_url === "string" ? value.application_url : undefined,
     client_id: typeof value.client_id === "string" ? value.client_id : undefined,
+    importantConfig: collectImportantConfig(value),
     name: typeof value.name === "string" ? value.name : undefined,
   };
+}
+
+function collectImportantConfig(value: Record<string, unknown>): ShopifyImportantConfigItem[] {
+  const items: ShopifyImportantConfigItem[] = [];
+
+  pushStringItem(items, "application_url", value.application_url);
+
+  if (isRecord(value.webhooks)) {
+    pushStringItem(items, "webhooks.api_version", value.webhooks.api_version);
+    pushStringArrayItem(items, "webhooks.topics", value.webhooks.topics);
+
+    if (Array.isArray(value.webhooks.subscriptions)) {
+      value.webhooks.subscriptions.forEach((subscription, index) => {
+        if (!isRecord(subscription)) {
+          return;
+        }
+
+        pushStringArrayItem(
+          items,
+          `webhooks.subscriptions[${index}].topics`,
+          subscription.topics,
+        );
+        pushStringItem(items, `webhooks.subscriptions[${index}].uri`, subscription.uri);
+      });
+    }
+  }
+
+  return items;
+}
+
+function pushStringItem(
+  items: ShopifyImportantConfigItem[],
+  label: string,
+  value: unknown,
+): void {
+  if (typeof value === "string" && value.trim().length > 0) {
+    items.push({ label, value: value.trim() });
+  }
+}
+
+function pushStringArrayItem(
+  items: ShopifyImportantConfigItem[],
+  label: string,
+  value: unknown,
+): void {
+  if (!Array.isArray(value)) {
+    return;
+  }
+
+  const strings = value.filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+
+  if (strings.length > 0) {
+    items.push({ label, value: strings.join(", ") });
+  }
 }

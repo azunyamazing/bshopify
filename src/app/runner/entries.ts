@@ -5,6 +5,7 @@ import { isNodeError } from "#/utils/node";
 import { isRecord, toRequiredString } from "#/utils/objects";
 import { toPosixPath } from "#/utils/paths";
 import type {
+  ExtensionDeployResult,
   ExtensionContext,
   ExtensionEntry,
   ExtensionLifecycle,
@@ -123,6 +124,35 @@ export async function validatePlans(
 ): Promise<void> {
   for (const plan of plans) {
     await plan.hooks.validate?.(createExtensionContext(context, plan.entry), plan, plans);
+  }
+}
+
+export async function runBeforeDeployHooks(
+  context: RunnerContextBase,
+  plans: PreparedExtensionPlan[],
+): Promise<void> {
+  for (const plan of plans) {
+    await plan.hooks.beforeDeploy?.(createExtensionContext(context, plan.entry), plan, plans);
+  }
+}
+
+export async function runAfterDeployHooks(
+  context: RunnerContextBase,
+  plans: PreparedExtensionPlan[],
+  result: ExtensionDeployResult,
+): Promise<void> {
+  for (const plan of plans) {
+    await plan.hooks.afterDeploy?.(createExtensionContext(context, plan.entry), result);
+  }
+}
+
+export async function runOnErrorHooks(
+  context: RunnerContextBase,
+  plans: PreparedExtensionPlan[],
+  error: unknown,
+): Promise<void> {
+  for (const plan of plans) {
+    await plan.hooks.onError?.(createExtensionContext(context, plan.entry), error);
   }
 }
 
