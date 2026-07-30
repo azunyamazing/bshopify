@@ -41,6 +41,7 @@ interface CommandWithRuntimeHiddenFlag {
 }
 
 interface PackageJsonFixture {
+  bin: Record<string, string>;
   name: string;
   scripts: Record<string, string>;
   version: string;
@@ -288,6 +289,10 @@ describe("bshopify CLI", () => {
     expect(packageInfo).toEqual({
       name: packageJson.name,
       version: packageJson.version,
+    });
+    expect(packageJson.bin).toEqual({
+      bshopify: "./dist/cli.js",
+      bs: "./dist/cli.js",
     });
     await expect(stat(join(process.cwd(), "src", "package-info.ts"))).rejects.toMatchObject({
       code: "ENOENT",

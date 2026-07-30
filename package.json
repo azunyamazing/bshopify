@@ -4,7 +4,8 @@
   "description": "BestFulfill Shopify App Runner CLI.",
   "type": "module",
   "bin": {
-    "bshopify": "./dist/cli.js"
+    "bshopify": "./dist/cli.js",
+    "bs": "./dist/cli.js"
   },
   "types": "./dist/index.d.ts",
   "exports": {
