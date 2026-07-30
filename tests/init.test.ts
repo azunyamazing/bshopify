@@ -798,6 +798,23 @@ describe("initProject", () => {
     expect(result.errors).toEqual([]);
   });
 
+  it("allows projects without extension directories", async () => {
+    const cwd = await createTempProject();
+    await rm(join(cwd, "extensions", "theme-extension"), { recursive: true });
+
+    const result = await initProject({ cwd });
+
+    await expect(readFile(join(cwd, "bshopify.config.mjs"), "utf8")).resolves.toContain(
+      "extensionsRoot",
+    );
+    expect(result.checks).not.toContainEqual({
+      name: "extensions/*",
+      ok: false,
+      message: "no extension directories found",
+    });
+    expect(result.errors).toEqual([]);
+  });
+
   it("reports invalid config file paths during check instead of throwing", async () => {
     const cwd = await createTempProject();
     await writeFile(
