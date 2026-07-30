@@ -19,7 +19,6 @@ export function formatDeploySummary(
       "Extensions",
       entries.length > 0 ? entries.map((entry) => entry.extension.name).join(", ") : undefined,
     ),
-    ...formatImportantProductionConfig(context),
     "",
   ].join("\n");
 }
@@ -30,20 +29,6 @@ export function formatRestoreNotice(dryRun: boolean): string {
     : "Deploy extension files restored.";
 
   return `\n${colorize(colorize(message, ansi.cyan), ansi.bold)}\n`;
-}
-
-function formatImportantProductionConfig(context: RunnerContextBase): string[] {
-  if (context.configName !== "production" || context.shopify.importantConfig.length === 0) {
-    return [];
-  }
-
-  return [
-    "",
-    colorize(colorize("Important production config", ansi.yellow), ansi.bold),
-    ...context.shopify.importantConfig.map(
-      (item) => `  ${colorize(item.label, ansi.gray)}: ${colorize(item.value, ansi.yellow)}`,
-    ),
-  ];
 }
 
 function formatBadge(label: string): string {

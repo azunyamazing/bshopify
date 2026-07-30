@@ -218,6 +218,45 @@ describe("bshopify CLI", () => {
     expect(output).not.toContain("Application URL:");
   });
 
+  it("omits imported production config review details from deploy summaries", () => {
+    const output = formatDeploySummary(
+      {
+        appProxy: undefined,
+        command: "deploy",
+        configName: "production",
+        env: "production",
+        extensionEnv: {
+          APP_ENV: "production",
+          SHOPIFY_CONFIG_NAME: "production",
+        },
+        runtimeConfig: {},
+        shopify: {
+          applicationUrl: "https://api.platform.test.standhigher.com/api/v2/shopify/entry/production",
+          configFile: "shopify.app.production.toml",
+          importantConfig: [
+            {
+              label: "application_url",
+              value: "https://api.platform.test.standhigher.com/api/v2/shopify/entry/production",
+            },
+            {
+              label: "webhooks.api_version",
+              value: "2026-01",
+            },
+          ],
+        },
+      } as DeploySummaryContextFixture,
+      [],
+      false,
+    );
+
+    expect(output).toContain("\u001B[1m\u001B[46m\u001B[30m DEPLOY SUMMARY \u001B[39m\u001B[49m\u001B[22m");
+    expect(output).toContain("\n  \u001B[1m\u001B[36mApplication URL\u001B[39m\u001B[22m\n    \u001B[1mhttps://api.platform.test.standhigher.com/api/v2/shopify/entry/production\u001B[22m");
+    expect(output).not.toContain("PRODUCTION CONFIG REVIEW REQUIRED");
+    expect(output).not.toContain("Review these imported Shopify production values before deploy.");
+    expect(output).not.toContain("application_url");
+    expect(output).not.toContain("webhooks.api_version");
+  });
+
   it("exposes the package name and version", () => {
     expect(packageInfo.name).toBe("@bestfulfill/bshopify");
     expect(packageInfo.version).toMatch(/^\d+\.\d+\.\d+/);
@@ -1027,7 +1066,7 @@ describe("deployProject", () => {
     expect(runShopifyCommand).not.toHaveBeenCalled();
   });
 
-  it("prints important production config values in the deploy summary", async () => {
+  it("omits imported production config values from the deploy summary", async () => {
     const cwd = await createDevProject();
     await writeFile(
       join(cwd, "shopify.app.production.toml"),
@@ -1066,13 +1105,14 @@ describe("deployProject", () => {
       log.mockRestore();
     }
 
-    expect(output).toContain("Important production config");
-    expect(output).toContain("application_url");
+    expect(output).toContain("DEPLOY DRY-RUN SUMMARY");
+    expect(output).toContain("Application URL");
     expect(output).toContain("https://production.example.com");
-    expect(output).toContain("webhooks.api_version");
-    expect(output).toContain("2026-01");
-    expect(output).toContain("webhooks.subscriptions[0].topics");
-    expect(output).toContain("orders/create, orders/updated");
+    expect(output).not.toContain("PRODUCTION CONFIG REVIEW REQUIRED");
+    expect(output).not.toContain("application_url");
+    expect(output).not.toContain("webhooks.api_version");
+    expect(output).not.toContain("webhooks.subscriptions[0].topics");
+    expect(output).not.toContain("orders/create, orders/updated");
   });
 
   it("injects deploy values, hides extension entries during Shopify deploy, and restores afterward", async () => {
@@ -1275,6 +1315,45 @@ describe("deployProject", () => {
       "--config",
       "production",
     ]);
+  });
+
+  it("prints a blank line before handing off to Shopify deploy output", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "shopify.app.production.toml"),
+      [
+        ...createShopifyBasicConfig("https://production.example.com"),
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid"),
+      "<div></div>\n",
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      "export default { async prepare() { return { injections: [] }; } };\n",
+    );
+    const events: string[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation((message) => {
+      events.push(message === "" ? "blank-line" : "bshopify-log");
+    });
+    const runShopifyCommand = vi.fn(async () => {
+      events.push("shopify-deploy");
+      return 0;
+    });
+
+    try {
+      await deployProject({
+        configName: "production",
+        cwd,
+        runShopifyCommand,
+      });
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(events[events.indexOf("shopify-deploy") - 1]).toBe("blank-line");
   });
 
   it("uses deploy wording when deploy injection values are missing", async () => {

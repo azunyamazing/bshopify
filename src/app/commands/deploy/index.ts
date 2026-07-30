@@ -121,6 +121,7 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
         }
 
         const runShopifyCommand = createShopifyDeployRunner(options.runShopifyCommand, cwd);
+        console.log("");
         exitCode =
           (await runShopifyCommand([
             "app",
