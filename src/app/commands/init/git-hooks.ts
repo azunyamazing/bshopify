@@ -25,12 +25,13 @@ interface GitHookPath {
 export async function writePreCommitHook(
   cwd: string,
   result: InitResult,
-): Promise<void> {
+  previousHookPath?: string,
+): Promise<string | undefined> {
   const hookPath = await resolveGitHookPath(cwd);
 
   if (hookPath === undefined) {
     result.warnings.push("git repository not found; pre-commit hook skipped");
-    return;
+    return undefined;
   }
 
   const created = await ensurePreCommitGuard(
@@ -42,6 +43,10 @@ export async function writePreCommitHook(
   if (created) {
     await chmod(hookPath.absolutePath, 0o755);
   }
+
+  await cleanupPreviousPreCommitGuard(cwd, result, previousHookPath, hookPath);
+
+  return hookPath.displayPath;
 }
 
 async function ensurePreCommitGuard(
@@ -65,7 +70,19 @@ async function ensurePreCommitGuard(
   }
 
   if (current.includes(preCommitGuardStartMarker)) {
-    result.skipped.push(displayPath);
+    const next = replacePreCommitGuardBlock(current);
+    if (next === current) {
+      result.skipped.push(displayPath);
+      return false;
+    }
+
+    await writeFile(absolutePath, next);
+    result.updated.push(displayPath);
+    return true;
+  }
+
+  if (current.includes(preCommitGuardEndMarker)) {
+    result.warnings.push(`${displayPath} has an incomplete bshopify app guard block`);
     return false;
   }
 
@@ -84,6 +101,58 @@ function insertPreCommitGuardBlock(current: string): string {
   lines.splice(insertIndex, 0, guardBlock);
 
   return `${lines.join("\n")}${current.endsWith("\n") ? "" : "\n"}`;
+}
+
+function replacePreCommitGuardBlock(current: string): string {
+  const guardBlock = `${preCommitGuardStartMarker}\n${preCommitGuardCommand}\n${preCommitGuardEndMarker}`;
+  const blockPattern = new RegExp(
+    `${escapeRegExp(preCommitGuardStartMarker)}\\n[\\s\\S]*?${escapeRegExp(preCommitGuardEndMarker)}`,
+  );
+
+  return current.replace(blockPattern, guardBlock);
+}
+
+async function cleanupPreviousPreCommitGuard(
+  cwd: string,
+  result: InitResult,
+  previousHookPath: string | undefined,
+  currentHookPath: GitHookPath,
+): Promise<void> {
+  if (previousHookPath === undefined) {
+    return;
+  }
+
+  const previousAbsolutePath = resolveProjectPath(cwd, previousHookPath);
+  if (previousAbsolutePath === currentHookPath.absolutePath) {
+    return;
+  }
+
+  let current = "";
+  try {
+    current = await readFile(previousAbsolutePath, "utf8");
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return;
+    }
+
+    throw error;
+  }
+
+  const next = removePreCommitGuardBlock(current);
+  if (next === current) {
+    return;
+  }
+
+  await writeFile(previousAbsolutePath, next);
+  result.updated.push(`removed stale pre-commit guard ${toDisplayPath(cwd, previousAbsolutePath)}`);
+}
+
+function removePreCommitGuardBlock(current: string): string {
+  const blockPattern = new RegExp(
+    `\\n?${escapeRegExp(preCommitGuardStartMarker)}\\n[\\s\\S]*?${escapeRegExp(preCommitGuardEndMarker)}\\n?`,
+  );
+
+  return current.replace(blockPattern, "\n").replace(/\n{3,}/g, "\n\n");
 }
 
 function removeLegacyPreCommitGuardBlock(lines: string[]): string[] {
@@ -138,4 +207,8 @@ async function readGitPath(cwd: string, path: string): Promise<string | undefine
   } catch {
     return undefined;
   }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

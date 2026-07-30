@@ -23,7 +23,7 @@ export interface AppliedInjection {
 }
 
 export interface FormatAppliedInjectionsOptions {
-  configName: string;
+  configName?: string;
   cwd: string;
   mode?: "deploy" | "dev" | "dryRun";
 }
@@ -136,16 +136,24 @@ function formatInjectionTitle(mode: "deploy" | "dev" | "dryRun"): string {
   return "Dev extension injections";
 }
 
-function formatInjectionReason(mode: "deploy" | "dev" | "dryRun", configName: string): string {
+function formatInjectionReason(mode: "deploy" | "dev" | "dryRun", configName: string | undefined): string {
   if (mode === "deploy") {
-    return `temporary values for shopify app deploy --config ${configName}; restored after deploy.`;
+    return `temporary values for ${formatShopifyAppCommand("deploy", configName)}; restored after deploy.`;
   }
 
   if (mode === "dryRun") {
-    return `temporary values for deploy dry-run --config ${configName}; restored after validation.`;
+    return `temporary values for deploy dry-run${formatConfigSuffix(configName)}; restored after validation.`;
   }
 
-  return `temporary values for shopify app dev --config ${configName}; restored when dev exits.`;
+  return `temporary values for ${formatShopifyAppCommand("dev", configName)}; restored when dev exits.`;
+}
+
+function formatShopifyAppCommand(command: string, configName: string | undefined): string {
+  return `shopify app ${command}${formatConfigSuffix(configName)}`;
+}
+
+function formatConfigSuffix(configName: string | undefined): string {
+  return configName === undefined ? "" : ` --config ${configName}`;
 }
 
 function groupAppliedInjections(applied: AppliedInjection[]): AppliedInjectionGroup[] {

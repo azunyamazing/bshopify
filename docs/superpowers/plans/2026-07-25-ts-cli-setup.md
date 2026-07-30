@@ -13,7 +13,7 @@
 ## 文件结构
 
 - Create: `.npmrc`，配置阿里云云仓 registry。
-- Create: `.gitignore`，忽略 `node_modules/`、`dist/`、coverage 和 `.bshopify-tmp/`。
+- Create: `.gitignore`，忽略 `node_modules/`、`dist/`、coverage 和 `.bshopify/`。
 - Create: `package.json`，声明 npm 包名、bin、exports、scripts、依赖和发布文件。
 - Create: `tsconfig.json`，配置严格 TypeScript 编译。
 - Create: `tsup.config.ts`，配置 ESM CLI 与类型声明构建。

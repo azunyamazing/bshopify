@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { confirm } from "@inquirer/prompts";
-import { loadRunnerConfig } from "#/app/runner/config";
+import { bshopifyStateDir } from "#/app/runner/constants";
+import { formatShopifyCliConfigArgs, loadRunnerConfig } from "#/app/runner/config";
 import { createRunnerContext } from "#/app/runner/context";
 import {
   findExtensionEntries,
@@ -47,8 +48,8 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
     runnerConfig: config,
   });
   assertShopifyDeployConfig(context);
-  const lock = await acquireLock(cwd, config.tmpRoot);
-  const transactionPath = join(cwd, config.tmpRoot, "extension-prepare.transaction.json");
+  const lock = await acquireLock(cwd, bshopifyStateDir);
+  const transactionPath = join(cwd, bshopifyStateDir, "extension-prepare.transaction.json");
 
   try {
     if (lock.recoveredStaleLock) {
@@ -76,7 +77,7 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
     if (!dryRun && options.yes !== true) {
       const shouldDeploy = await confirm({
         default: false,
-        message: `Deploy ${configName} with ${context.shopify.configFile}?`,
+        message: `Deploy ${context.configName} with ${context.shopify.configFile}?`,
       });
 
       if (!shouldDeploy) {
@@ -98,7 +99,7 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
       }
 
       const injectionSummary = formatAppliedInjections(appliedInjections, {
-        configName,
+        configName: context.shopify.cliConfigName,
         cwd,
         mode: dryRun ? "dryRun" : "deploy",
       });
@@ -126,8 +127,7 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
           (await runShopifyCommand([
             "app",
             "deploy",
-            "--config",
-            configName,
+            ...formatShopifyCliConfigArgs(context.shopify.cliConfigName),
             ...(options.shopifyArgs ?? []),
           ])) ?? 0;
       }

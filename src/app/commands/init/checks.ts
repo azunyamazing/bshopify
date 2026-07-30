@@ -2,31 +2,42 @@ import { constants } from "node:fs";
 import { access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isNodeError } from "#/utils/node";
-import { requiredShopifyConfigFiles } from "./constants";
 import type { InitResult } from "./types";
 
-export async function runProjectChecks(cwd: string, result: InitResult): Promise<void> {
-  await checkPath(cwd, "package.json", "found package.json", result);
-  await checkPath(cwd, "extensions", "found extensions directory", result);
+export interface ProjectCheckOptions {
+  configFiles: string[];
+  extensionsRoot: string;
+}
 
-  for (const fileName of requiredShopifyConfigFiles) {
+export async function runProjectChecks(
+  cwd: string,
+  result: InitResult,
+  options: ProjectCheckOptions,
+): Promise<void> {
+  await checkPath(cwd, "package.json", "found package.json", result);
+  await checkPath(cwd, options.extensionsRoot, `found ${options.extensionsRoot} directory`, result);
+
+  for (const fileName of options.configFiles) {
     await checkPath(cwd, fileName, `found ${fileName}`, result);
   }
 
-  const extensionNames = await readExtensionNames(cwd);
+  const extensionNames = await readExtensionNames(cwd, options.extensionsRoot);
   if (extensionNames.length === 0) {
     result.checks.push({
-      name: "extensions/*",
+      name: `${options.extensionsRoot}/*`,
       ok: false,
       message: "no extension directories found",
     });
-    result.errors.push("no extension directories found under extensions/");
+    result.errors.push(`no extension directories found under ${options.extensionsRoot}/`);
   }
 }
 
-export async function readExtensionNames(cwd: string): Promise<string[]> {
+export async function readExtensionNames(
+  cwd: string,
+  extensionsRoot = "extensions",
+): Promise<string[]> {
   try {
-    const entries = await readdir(join(cwd, "extensions"), { withFileTypes: true });
+    const entries = await readdir(join(cwd, extensionsRoot), { withFileTypes: true });
     return entries
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)

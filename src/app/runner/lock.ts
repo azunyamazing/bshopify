@@ -10,11 +10,11 @@ export interface LockHandle {
 
 export async function acquireLock(
   cwd: string,
-  tmpRootName: string,
+  stateDirName: string,
 ): Promise<LockHandle> {
-  const tmpRoot = join(cwd, tmpRootName);
-  const lockPath = join(tmpRoot, "extension-prepare.lock");
-  await mkdir(tmpRoot, { recursive: true });
+  const stateDir = join(cwd, stateDirName);
+  const lockPath = join(stateDir, "extension-prepare.lock");
+  await mkdir(stateDir, { recursive: true });
 
   let handle;
   let recoveredStaleLock = false;

@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { loadRunnerConfig } from "#/app/runner/config";
+import { bshopifyStateDir } from "#/app/runner/constants";
+import { formatShopifyCliConfigArgs, loadRunnerConfig } from "#/app/runner/config";
 import { createRunnerContext } from "#/app/runner/context";
 import {
   findExtensionEntries,
@@ -32,8 +33,8 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
     cwd,
     runnerConfig: config,
   });
-  const lock = await acquireLock(cwd, config.tmpRoot);
-  const transactionPath = join(cwd, config.tmpRoot, "extension-prepare.transaction.json");
+  const lock = await acquireLock(cwd, bshopifyStateDir);
+  const transactionPath = join(cwd, bshopifyStateDir, "extension-prepare.transaction.json");
 
   try {
     if (lock.recoveredStaleLock) {
@@ -64,7 +65,7 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       }
 
       const injectionSummary = formatAppliedInjections(appliedInjections, {
-        configName,
+        configName: context.shopify.cliConfigName,
         cwd,
       });
 
@@ -81,8 +82,7 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       const exitCode = await runShopifyCommand([
         "app",
         "dev",
-        "--config",
-        configName,
+        ...formatShopifyCliConfigArgs(context.shopify.cliConfigName),
         ...(options.shopifyArgs ?? []),
       ]);
 

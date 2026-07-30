@@ -1,6 +1,5 @@
 export const configFileName = "bshopify.config.mjs";
 export const entryFileName = "__entry.js";
-export const tmpRoot = ".bshopify-tmp/";
 
 export const requiredShopifyConfigFiles = [
   "shopify.app.dev.toml",
@@ -19,9 +18,6 @@ export default {
   // Directory that contains Shopify extension folders.
   extensionsRoot: "extensions",
 
-  // Temporary transaction directory used while injecting and restoring files.
-  tmpRoot: ".bshopify-tmp",
-
   // Business-side extension entry file generated under each extension.
   entryFileName: "__entry.js",
 
@@ -38,9 +34,6 @@ export default {
   // Add file-type-aware restore comments during dev so cleanup only reverts injected values.
   // Set to false as an escape hatch if a target file type cannot safely contain comments.
   restoreMarkers: true,
-
-  // Hide extension entry files before deploy so they are not shipped.
-  hideEntryBeforeDeploy: true,
 };
 `;
 

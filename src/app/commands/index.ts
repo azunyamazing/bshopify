@@ -24,6 +24,7 @@ interface DevCommandOptions {
 interface InitCommandOptions {
   check?: boolean;
   cwd?: string;
+  update?: boolean;
 }
 
 export interface AppCommandDependencies {
@@ -47,6 +48,7 @@ export function createAppCommand(dependencies: AppCommandDependencies = {}): Com
     .command("init")
     .description("Initialize bshopify in the current Shopify app project.")
     .option("--check", "only check project readiness without writing files")
+    .option("--update", "sync bshopify generated files for an existing project")
     .option("--cwd <path>", "project directory to initialize")
     .action(async (options: InitCommandOptions) => {
       const result = await initializeProject(toInitOptions(options));
@@ -60,7 +62,7 @@ export function createAppCommand(dependencies: AppCommandDependencies = {}): Com
   appCommand
     .command("deploy")
     .description("Deploy a Shopify app with temporary extension config injection.")
-    .option("--config <name>", "Shopify app config name to deploy")
+    .option("--config <name>", "bshopify configFiles key to deploy")
     .option("--cwd <path>", "project directory to deploy")
     .option("--dry-run", "prepare and validate deploy injections without calling Shopify CLI")
     .option("--yes", "skip interactive deploy confirmation")
@@ -78,7 +80,7 @@ export function createAppCommand(dependencies: AppCommandDependencies = {}): Com
   appCommand
     .command("dev")
     .description("Run Shopify app dev with temporary extension config injection.")
-    .option("--config <name>", "Shopify app config name to run", "dev")
+    .option("--config <name>", "bshopify configFiles key to run", "dev")
     .option("--cwd <path>", "project directory to run")
     .allowUnknownOption(true)
     .argument("[shopifyArgs...]", "extra arguments passed to Shopify CLI after --")
@@ -143,6 +145,7 @@ function toInitOptions(options: InitCommandOptions): InitOptions {
   return {
     check: options.check,
     cwd: options.cwd,
+    update: options.update,
   };
 }
 

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { loadShopifyAppConfig } from "./config";
+import { getShopifyCliConfigName, loadShopifyAppConfig } from "./config";
 import type { RunnerCommand, RunnerConfig, RunnerContextBase } from "./types";
 import { normalizePathPart } from "../utils/extensions";
 
@@ -20,20 +20,22 @@ export async function createRunnerContext(
     throw new Error(`bshopify configFiles.${configName} is required.`);
   }
 
+  const effectiveConfigName = getShopifyCliConfigName(configFile);
   const shopifyConfig = await loadShopifyAppConfig(join(cwd, configFile), configFile);
   const appProxy = shopifyConfig.app_proxy === undefined
     ? undefined
     : createAppProxyContext(shopifyConfig.app_proxy, configFile);
-  const env = configName === "production" ? "prod" : configName;
+  const contextConfigName = effectiveConfigName ?? configName;
+  const env = contextConfigName === "production" ? "prod" : contextConfigName;
 
   return {
     appProxy,
     command,
-    configName,
+    configName: contextConfigName,
     env,
     extensionEnv: {
       APP_ENV: env,
-      SHOPIFY_CONFIG_NAME: configName,
+      SHOPIFY_CONFIG_NAME: contextConfigName,
       SHOPIFY_APP_PROXY_BASE: appProxy?.apiBase,
       SHOPIFY_APP_PROXY_PREFIX: appProxy?.prefix,
       SHOPIFY_APP_PROXY_SUBPATH: appProxy?.subpath,
@@ -43,6 +45,7 @@ export async function createRunnerContext(
     shopify: {
       applicationUrl: shopifyConfig.application_url,
       appName: shopifyConfig.name,
+      cliConfigName: effectiveConfigName,
       clientId: shopifyConfig.client_id,
       configFile,
       importantConfig: shopifyConfig.importantConfig,

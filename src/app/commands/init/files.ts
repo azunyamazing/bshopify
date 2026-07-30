@@ -1,68 +1,32 @@
 import { constants } from "node:fs";
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isNodeError } from "#/utils/node";
 import { readPackageJson } from "#/utils/package-json";
-import { readExtensionNames } from "./checks";
 import {
   configFileName,
-  entryFileName,
-  extensionEntryTemplate,
   recommendedScripts,
   runnerConfigTemplate,
-  tmpRoot,
 } from "./constants";
 import { resolveProjectPath, toDisplayPath } from "./paths";
+import { mergeRunnerConfig } from "./runner-config-merge";
 import type { InitResult } from "./types";
 
 export async function writeRunnerConfig(
   cwd: string,
   result: InitResult,
 ): Promise<void> {
-  await writeFileIfMissing(cwd, configFileName, runnerConfigTemplate, result);
-}
+  const created = await writeFileIfMissing(cwd, configFileName, runnerConfigTemplate, result);
 
-export async function ensureGitignoreEntry(
-  cwd: string,
-  result: InitResult,
-): Promise<void> {
-  const gitignorePath = join(cwd, ".gitignore");
-  let current = "";
-
-  try {
-    current = await readFile(gitignorePath, "utf8");
-  } catch (error) {
-    if (!isNodeError(error) || error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  const lines = current.split(/\r?\n/).filter(Boolean);
-  if (lines.includes(tmpRoot)) {
-    result.skipped.push(".gitignore");
-    return;
-  }
-
-  const next = `${current}${current.endsWith("\n") || current.length === 0 ? "" : "\n"}${tmpRoot}\n`;
-  await writeFile(gitignorePath, next);
-  result.updated.push(".gitignore");
-}
-
-export async function writeExtensionEntries(
-  cwd: string,
-  result: InitResult,
-): Promise<void> {
-  const extensionNames = await readExtensionNames(cwd);
-
-  for (const extensionName of extensionNames) {
-    const entryPath = join("extensions", extensionName, entryFileName);
-    await writeFileIfMissing(cwd, entryPath, extensionEntryTemplate, result);
+  if (!created) {
+    await mergeRunnerConfig(cwd, result);
   }
 }
 
 export async function updatePackageScripts(
   cwd: string,
   result: InitResult,
+  onlyAddMissing = false,
 ): Promise<void> {
   const packagePath = join(cwd, "package.json");
   const packageJson = await readPackageJson(packagePath);
@@ -75,6 +39,13 @@ export async function updatePackageScripts(
     }
 
     const previousCommand = scripts[name];
+    if (onlyAddMissing && previousCommand !== undefined) {
+      result.warnings.push(
+        `package.json scripts: kept custom ${name}: ${JSON.stringify(previousCommand)}`,
+      );
+      continue;
+    }
+
     changes.push(formatScriptChange(name, command, previousCommand));
     scripts[name] = command;
   }
@@ -89,7 +60,7 @@ export async function updatePackageScripts(
   result.updated.push(...changes);
 }
 
-async function writeFileIfMissing(
+export async function writeFileIfMissing(
   cwd: string,
   path: string,
   content: string,

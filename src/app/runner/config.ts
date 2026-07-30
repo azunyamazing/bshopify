@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { loadOptionalDefaultExport, loadTomlConfig } from "#/utils/config";
 import {
   isRecord,
@@ -18,7 +18,6 @@ export const defaultRunnerConfig: RunnerConfig = {
   extensionsRoot: "extensions",
   failOnUnresolvedPlaceholders: true,
   restoreMarkers: true,
-  tmpRoot: ".bshopify-tmp",
 };
 
 export async function loadRunnerConfig(cwd: string): Promise<RunnerConfig> {
@@ -26,10 +25,7 @@ export async function loadRunnerConfig(cwd: string): Promise<RunnerConfig> {
   const configModule = await loadOptionalDefaultExport(configPath);
   const loaded = isRecord(configModule) ? configModule : {};
   const configFiles = isRecord(loaded.configFiles)
-    ? {
-        ...defaultRunnerConfig.configFiles,
-        ...toStringRecord(loaded.configFiles),
-      }
+    ? validateConfigFiles(toStringRecord(loaded.configFiles))
     : defaultRunnerConfig.configFiles;
 
   return {
@@ -44,7 +40,6 @@ export async function loadRunnerConfig(cwd: string): Promise<RunnerConfig> {
       typeof loaded.restoreMarkers === "boolean"
         ? loaded.restoreMarkers
         : defaultRunnerConfig.restoreMarkers,
-    tmpRoot: toNonEmptyString(loaded.tmpRoot, defaultRunnerConfig.tmpRoot),
   };
 }
 
@@ -53,6 +48,46 @@ export async function loadShopifyAppConfig(
   displayPath: string,
 ): Promise<ShopifyAppConfig> {
   return loadShopifyAppConfigRecord(await loadTomlConfig(configPath), displayPath);
+}
+
+export function getShopifyCliConfigName(configFile: string): string | undefined {
+  const fileName = basename(configFile);
+  const withoutToml = fileName.endsWith(".toml") ? fileName.slice(0, -".toml".length) : fileName;
+
+  if (withoutToml === "shopify.app") {
+    return undefined;
+  }
+
+  return withoutToml.startsWith("shopify.app.")
+    ? withoutToml.slice("shopify.app.".length)
+    : withoutToml;
+}
+
+export function formatShopifyCliConfigArgs(configName: string | undefined): string[] {
+  return configName === undefined ? [] : ["--config", configName];
+}
+
+function validateConfigFiles(configFiles: Record<string, string>): Record<string, string> {
+  for (const [configName, configFile] of Object.entries(configFiles)) {
+    if (configFile.trim().length === 0) {
+      continue;
+    }
+
+    if (!isRootShopifyAppConfigFile(configFile)) {
+      throw new Error(
+        `bshopify configFiles.${configName} must be a root-level Shopify app config file: shopify.app.toml or shopify.app.<name>.toml.`,
+      );
+    }
+  }
+
+  return configFiles;
+}
+
+function isRootShopifyAppConfigFile(configFile: string): boolean {
+  return (
+    basename(configFile) === configFile
+    && /^shopify\.app(?:\.[^/\\]+)?\.toml$/.test(configFile)
+  );
 }
 
 function loadShopifyAppConfigRecord(value: unknown, displayPath: string): ShopifyAppConfig {

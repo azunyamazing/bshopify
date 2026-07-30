@@ -1,4 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { parse } from "smol-toml";
 import { isNodeError } from "./node";
@@ -14,7 +15,7 @@ export async function loadOptionalDefaultExport(path: string): Promise<unknown |
     throw error;
   }
 
-  const module = await import(`${pathToFileURL(path).href}?t=${Date.now()}`);
+  const module = await import(`${pathToFileURL(path).href}?t=${randomUUID()}`);
   return module.default;
 }
 

@@ -17,7 +17,8 @@ vi.mock("@inquirer/prompts", async (importOriginal) => {
   return {
     ...actual,
     confirm: vi.fn(async () => true),
-    input: vi.fn(async () => "production"),
+    input: vi.fn(async () => "confirm"),
+    select: vi.fn(async ({ choices }: { choices: Array<{ value: string }> }) => choices[0]?.value),
   };
 });
 
@@ -32,6 +33,8 @@ import {
   runShopifyCommand,
   runCli,
 } from "../src";
+import { findExtensionEntries, loadExtensionHooks } from "../src/app/runner/entries";
+import { defaultRunnerConfig } from "../src/app/runner/config";
 
 interface CommandWithRuntimeHiddenFlag {
   _hidden?: boolean;
@@ -70,6 +73,10 @@ interface DeploySummaryContextFixture {
     configFile: string;
     importantConfig: Array<{ label: string; value: string }>;
   };
+}
+
+interface EmittedWarning {
+  code?: string;
 }
 
 const tempDirs: string[] = [];
@@ -504,6 +511,7 @@ describe("bshopify CLI", () => {
         "bshopify",
         "app",
         "init",
+        "--update",
         "--check",
         "--cwd",
         "/tmp/shopify-app",
@@ -515,6 +523,7 @@ describe("bshopify CLI", () => {
     expect(initProject).toHaveBeenCalledWith({
       check: true,
       cwd: "/tmp/shopify-app",
+      update: true,
     });
   });
 
@@ -655,6 +664,67 @@ describe("bshopify CLI", () => {
 });
 
 describe("devProject", () => {
+  it("loads ESM extension entries without Node typeless package warnings", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bshopify-entry-warning-"));
+    tempDirs.push(cwd);
+    const emittedWarnings: EmittedWarning[] = [];
+    const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(
+      ((warning: string | Error, options?: string | NodeJS.EmitWarningOptions) => {
+        emittedWarnings.push({
+          code: typeof options === "object" ? options.code : undefined,
+        });
+      }) as typeof process.emitWarning,
+    );
+
+    await writeFile(join(cwd, "package.json"), `${JSON.stringify({ name: "fixture" })}\n`);
+    await mkdir(join(cwd, "extensions", "theme-extension"), { recursive: true });
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      "export default { prepare() { return { injections: [] }; } };\n",
+    );
+
+    try {
+      const entries = await findExtensionEntries(cwd, defaultRunnerConfig);
+
+      await loadExtensionHooks(entries);
+    } finally {
+      emitWarning.mockRestore();
+    }
+
+    expect(emittedWarnings).not.toContainEqual({
+      code: "MODULE_TYPELESS_PACKAGE_JSON",
+    });
+  });
+
+  it("does not force extension entry relative CommonJS helpers to load as ESM", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "bshopify-entry-helper-"));
+    tempDirs.push(cwd);
+
+    await writeFile(join(cwd, "package.json"), `${JSON.stringify({ name: "fixture" })}\n`);
+    await mkdir(join(cwd, "extensions", "theme-extension"), { recursive: true });
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "helper.js"),
+      "module.exports = { extensionName: 'theme-extension' };\n",
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      [
+        'import helper from "./helper.js";',
+        "export default {",
+        "  prepare() {",
+        "    return { extension: helper.extensionName, injections: [] };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const entries = await findExtensionEntries(cwd, defaultRunnerConfig);
+    const hooks = await loadExtensionHooks(entries);
+
+    expect(hooks).toHaveLength(1);
+  });
+
   it("injects dev app proxy values while Shopify dev runs and restores placeholders afterward", async () => {
     const cwd = await createDevProject();
     const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
@@ -675,7 +745,7 @@ describe("devProject", () => {
     await expect(readFile(targetPath, "utf8")).resolves.toBe(
       '<div data-api-base="__SHOPIFY_APP_PROXY_BASE__"></div>\n<p>edited during dev</p>\n',
     );
-    await expect(readFile(join(cwd, ".bshopify-tmp", "extension-prepare.lock"), "utf8")).rejects.toMatchObject({
+    await expect(readFile(join(cwd, ".bshopify", "extension-prepare.lock"), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
     expect(exitCode).toBe(0);
@@ -707,6 +777,104 @@ describe("devProject", () => {
     await devProject({ configName: "test", cwd, runShopifyCommand });
 
     expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "test"]);
+  });
+
+  it("uses the configured config file name for app dev context and Shopify CLI", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        "  configFiles: {",
+        '    dev: "shopify.app.preview.toml",',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "shopify.app.preview.toml"),
+      [
+        'name = "fixture"',
+        'client_id = "client-id"',
+        "",
+        "[app_proxy]",
+        'prefix = "apps"',
+        'subpath = "fixture-preview"',
+        'url = "https://example.test/proxy"',
+        "",
+      ].join("\n"),
+    );
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    const runShopifyCommand = vi.fn(async () => {
+      await expect(readFile(targetPath, "utf8")).resolves.toContain(
+        "/apps/fixture-preview",
+      );
+      return 0;
+    });
+
+    await devProject({ cwd, runShopifyCommand });
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "preview"]);
+  });
+
+  it("rejects configured dev config files outside the app root", async () => {
+    const cwd = await createDevProject();
+    await mkdir(join(cwd, "configs"), { recursive: true });
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        "  configFiles: {",
+        '    dev: "configs/shopify.app.preview.toml",',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(devProject({ cwd })).rejects.toThrow(
+      "bshopify configFiles.dev must be a root-level Shopify app config file",
+    );
+  });
+
+  it("omits Shopify CLI config args for the default app config file", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        "  configFiles: {",
+        '    dev: "shopify.app.toml",',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "shopify.app.toml"),
+      [
+        'name = "fixture"',
+        'client_id = "client-id"',
+        "",
+        "[app_proxy]",
+        'prefix = "apps"',
+        'subpath = "fixture-default"',
+        'url = "https://example.test/proxy"',
+        "",
+      ].join("\n"),
+    );
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    const runShopifyCommand = vi.fn(async () => {
+      await expect(readFile(targetPath, "utf8")).resolves.toContain(
+        "/apps/fixture-default",
+      );
+      return 0;
+    });
+
+    await devProject({ cwd, runShopifyCommand });
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev"]);
   });
 
   it("prints the dev placeholder injection details with color", async () => {
@@ -795,14 +963,14 @@ describe("devProject", () => {
 
   it("cleans a stale dev lock before preparing extensions", async () => {
     const cwd = await createDevProject();
-    await mkdir(join(cwd, ".bshopify-tmp"), { recursive: true });
-    await writeFile(join(cwd, ".bshopify-tmp", "extension-prepare.lock"), "999999999\n");
+    await mkdir(join(cwd, ".bshopify"), { recursive: true });
+    await writeFile(join(cwd, ".bshopify", "extension-prepare.lock"), "999999999\n");
     const runShopifyCommand = vi.fn(async () => 0);
 
     await devProject({ cwd, runShopifyCommand });
 
     expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "dev"]);
-    await expect(readFile(join(cwd, ".bshopify-tmp", "extension-prepare.lock"), "utf8")).rejects.toMatchObject({
+    await expect(readFile(join(cwd, ".bshopify", "extension-prepare.lock"), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
@@ -811,9 +979,9 @@ describe("devProject", () => {
     const cwd = await createDevProject();
     const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
     const marker = "{% comment %} bshopify-restore:stale {% endcomment %}";
-    const transactionPath = join(cwd, ".bshopify-tmp", "extension-prepare.transaction.json");
-    await mkdir(join(cwd, ".bshopify-tmp"), { recursive: true });
-    await writeFile(join(cwd, ".bshopify-tmp", "extension-prepare.lock"), "999999999\n");
+    const transactionPath = join(cwd, ".bshopify", "extension-prepare.transaction.json");
+    await mkdir(join(cwd, ".bshopify"), { recursive: true });
+    await writeFile(join(cwd, ".bshopify", "extension-prepare.lock"), "999999999\n");
     await writeFile(
       targetPath,
       `<div data-api-base="/apps/fixture-dev${marker}"></div>\n`,
@@ -854,10 +1022,10 @@ describe("devProject", () => {
 
   it("releases the dev lock when stale transaction recovery fails", async () => {
     const cwd = await createDevProject();
-    const lockPath = join(cwd, ".bshopify-tmp", "extension-prepare.lock");
-    await mkdir(join(cwd, ".bshopify-tmp"), { recursive: true });
+    const lockPath = join(cwd, ".bshopify", "extension-prepare.lock");
+    await mkdir(join(cwd, ".bshopify"), { recursive: true });
     await writeFile(lockPath, "999999999\n");
-    await writeFile(join(cwd, ".bshopify-tmp", "extension-prepare.transaction.json"), "{\n");
+    await writeFile(join(cwd, ".bshopify", "extension-prepare.transaction.json"), "{\n");
 
     await expect(devProject({ cwd, runShopifyCommand: vi.fn(async () => 0) })).rejects.toThrow();
 
@@ -1043,6 +1211,187 @@ describe("deployProject", () => {
     expect(runShopifyCommand).toHaveBeenCalledWith(["app", "deploy", "--config", "test"]);
   });
 
+  it("uses the configured config file name for app deploy context and Shopify CLI", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        "  configFiles: {",
+        '    test: "shopify.app.preview.toml",',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "shopify.app.preview.toml"),
+      [
+        ...createShopifyBasicConfig("https://preview.example.com"),
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid"),
+      "<div></div>\n",
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      "export default { async prepare() { return { injections: [] }; } };\n",
+    );
+    const runShopifyCommand = vi.fn(async () => 0);
+
+    const exitCode = await deployProject({
+      configName: "test",
+      cwd,
+      runShopifyCommand,
+      yes: true,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "deploy", "--config", "preview"]);
+  });
+
+  it("uses the selected production config key for deploy confirmation regardless of file suffix", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        "  configFiles: {",
+        '    production: "shopify.app.prod.toml",',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "shopify.app.prod.toml"),
+      [
+        ...createShopifyBasicConfig("https://production.example.com"),
+        "",
+      ].join("\n"),
+    );
+    const runShopifyCommand = vi.fn(async () => 0);
+
+    await expect(
+      deployProject({
+        configName: "production",
+        cwd,
+        runShopifyCommand,
+        yes: true,
+      }),
+    ).rejects.toThrow("Production deploy requires --confirm-production.");
+    expect(runShopifyCommand).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the config picker when the requested deploy config key is not configured", async () => {
+    const prompts = await import("@inquirer/prompts");
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "shopify.app.test.toml"),
+      [
+        ...createShopifyBasicConfig("https://test.example.com"),
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid"),
+      "<div></div>\n",
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      "export default { async prepare() { return { injections: [] }; } };\n",
+    );
+    vi.mocked(prompts.select).mockResolvedValueOnce("test");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => 0);
+
+    let exitCode = 1;
+    try {
+      exitCode = await deployProject({
+        configName: "prod",
+        cwd,
+        runShopifyCommand,
+        yes: true,
+      });
+      expect(warn).toHaveBeenCalledWith(
+        "bshopify configFiles.prod is not configured. Select a deploy config to continue.\n",
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(exitCode).toBe(0);
+    expect(prompts.select).toHaveBeenCalled();
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "deploy", "--config", "test"]);
+  });
+
+  it("rejects configured deploy config files outside the app root", async () => {
+    const cwd = await createDevProject();
+    await mkdir(join(cwd, "configs"), { recursive: true });
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        "  configFiles: {",
+        '    test: "configs/shopify.app.preview.toml",',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(
+      deployProject({
+        configName: "test",
+        cwd,
+        yes: true,
+      }),
+    ).rejects.toThrow("bshopify configFiles.test must be a root-level Shopify app config file");
+  });
+
+  it("omits Shopify CLI config args for the default app deploy config file", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        "  configFiles: {",
+        '    test: "shopify.app.toml",',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "shopify.app.toml"),
+      [
+        ...createShopifyBasicConfig("https://default.example.com"),
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid"),
+      "<div></div>\n",
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      "export default { async prepare() { return { injections: [] }; } };\n",
+    );
+    const runShopifyCommand = vi.fn(async () => 0);
+
+    const exitCode = await deployProject({
+      configName: "test",
+      cwd,
+      runShopifyCommand,
+      yes: true,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "deploy"]);
+  });
+
   it("requires Shopify basic fields for deploy configs", async () => {
     const cwd = await createDevProject();
     await writeFile(
@@ -1151,7 +1500,7 @@ describe("deployProject", () => {
       '<div data-api-base="__SHOPIFY_APP_PROXY_BASE__"></div>\n',
     );
     await expect(readFile(entryPath, "utf8")).resolves.toContain("async prepare(ctx)");
-    await expect(readFile(join(cwd, ".bshopify-tmp", "extension-prepare.lock"), "utf8")).rejects.toMatchObject({
+    await expect(readFile(join(cwd, ".bshopify", "extension-prepare.lock"), "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
     expect(exitCode).toBe(0);
@@ -1175,10 +1524,10 @@ describe("deployProject", () => {
     const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
     const entryPath = join(cwd, "extensions", "theme-extension", "__entry.js");
     const hiddenPath = `${entryPath}.bshopify-hidden-stale`;
-    const transactionPath = join(cwd, ".bshopify-tmp", "extension-prepare.transaction.json");
+    const transactionPath = join(cwd, ".bshopify", "extension-prepare.transaction.json");
     const entrySource = await readFile(entryPath, "utf8");
-    await mkdir(join(cwd, ".bshopify-tmp"), { recursive: true });
-    await writeFile(join(cwd, ".bshopify-tmp", "extension-prepare.lock"), "999999999\n");
+    await mkdir(join(cwd, ".bshopify"), { recursive: true });
+    await writeFile(join(cwd, ".bshopify", "extension-prepare.lock"), "999999999\n");
     await writeFile(hiddenPath, entrySource);
     await rm(entryPath);
     await writeFile(
@@ -1293,7 +1642,7 @@ describe("deployProject", () => {
     });
     vi.mocked(prompts.input).mockImplementationOnce(() => {
       events.push("confirm-production");
-      return Object.assign(Promise.resolve("production"), {
+      return Object.assign(Promise.resolve("confirm"), {
         cancel: () => undefined,
       });
     });

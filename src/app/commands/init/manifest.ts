@@ -1,0 +1,160 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { bshopifyStateDir } from "#/app/runner/constants";
+import { isNodeError } from "#/utils/node";
+import { isRecord, toStringRecord } from "#/utils/objects";
+import { recommendedScripts } from "./constants";
+import { resolveProjectPath, toDisplayPath } from "./paths";
+
+export const manifestFileName = "bshopify.manifest.json";
+
+export interface InitManifest {
+  configFile: string;
+  extensionEntries: Record<string, InitManifestExtensionEntry>;
+  gitignore: InitManifestGitignore;
+  packageScripts: Record<string, string>;
+  preCommitHook?: InitManifestPath;
+  version: number;
+}
+
+export interface InitManifestExtensionEntry {
+  contentHash?: string;
+  path: string;
+}
+
+export interface InitManifestGitignore {
+  path: string;
+}
+
+export interface InitManifestPath {
+  path: string;
+}
+
+export async function loadInitManifest(cwd: string): Promise<InitManifest> {
+  try {
+    return normalizeManifest(JSON.parse(await readFile(getManifestPath(cwd), "utf8")));
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      return createEmptyManifest();
+    }
+
+    throw error;
+  }
+}
+
+export async function saveInitManifest(
+  cwd: string,
+  manifest: InitManifest,
+): Promise<void> {
+  const targetPath = getManifestPath(cwd);
+  await mkdir(dirname(targetPath), { recursive: true });
+  await writeFile(
+    targetPath,
+    `${JSON.stringify(normalizeManifest(manifest), null, 2)}\n`,
+  );
+}
+
+export function applyRunnerConfigToManifest(manifest: InitManifest): void {
+  manifest.configFile = "bshopify.config.mjs";
+  manifest.gitignore = {
+    path: ".gitignore",
+  };
+  manifest.packageScripts = { ...recommendedScripts };
+}
+
+export function recordPreCommitHook(manifest: InitManifest, path: string | undefined): void {
+  if (path === undefined) {
+    delete manifest.preCommitHook;
+    return;
+  }
+
+  manifest.preCommitHook = { path };
+}
+
+export function recordExtensionEntry(
+  manifest: InitManifest,
+  extensionName: string,
+  cwd: string,
+  absolutePath: string,
+  contentHash?: string,
+): void {
+  manifest.extensionEntries[extensionName] = {
+    ...(contentHash === undefined ? {} : { contentHash }),
+    path: toDisplayPath(cwd, absolutePath),
+  };
+}
+
+function createEmptyManifest(): InitManifest {
+  return {
+    configFile: "bshopify.config.mjs",
+    extensionEntries: {},
+    gitignore: {
+      path: ".gitignore",
+    },
+    packageScripts: {},
+    version: 1,
+  };
+}
+
+function getManifestPath(cwd: string): string {
+  return resolveProjectPath(cwd, join(bshopifyStateDir, manifestFileName));
+}
+
+function normalizeManifest(value: unknown): InitManifest {
+  if (!isRecord(value)) {
+    return createEmptyManifest();
+  }
+
+  return {
+    configFile: typeof value.configFile === "string" ? value.configFile : "bshopify.config.mjs",
+    extensionEntries: normalizeExtensionEntries(value.extensionEntries),
+    gitignore: normalizeGitignore(value.gitignore),
+    packageScripts: normalizeStringRecord(value.packageScripts),
+    preCommitHook: normalizePathRecord(value.preCommitHook),
+    version: 1,
+  };
+}
+
+function normalizeExtensionEntries(value: unknown): Record<string, InitManifestExtensionEntry> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const entries: Record<string, InitManifestExtensionEntry> = {};
+  for (const [name, entry] of Object.entries(value)) {
+    if (!isRecord(entry) || typeof entry.path !== "string") {
+      continue;
+    }
+
+    entries[name] = {
+      ...(typeof entry.contentHash === "string" ? { contentHash: entry.contentHash } : {}),
+      path: entry.path,
+    };
+  }
+
+  return entries;
+}
+
+function normalizeGitignore(value: unknown): InitManifestGitignore {
+  if (isRecord(value)) {
+    return {
+      path: typeof value.path === "string" ? value.path : ".gitignore",
+    };
+  }
+
+  return {
+    path: ".gitignore",
+  };
+}
+
+function normalizePathRecord(value: unknown): InitManifestPath | undefined {
+  if (!isRecord(value) || typeof value.path !== "string") {
+    return undefined;
+  }
+
+  return { path: value.path };
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> {
+  return isRecord(value) ? toStringRecord(value) : {};
+}

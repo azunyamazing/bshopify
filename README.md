@@ -90,7 +90,7 @@ node dist/cli.js --help
 | 命令 | 目标用途 |
 |-|-|
 | `bshopify app init` | 初始化项目接入文件、配置、Git hook、推荐 scripts 和 Extension Entry |
-| `bshopify app dev` | 临时注入 Extension Entry 产物，执行 `shopify app dev --config <name>`，结束后恢复占位符 |
+| `bshopify app dev` | 临时注入 Extension Entry 产物，按配置文件路径推导 Shopify config 名并执行 `shopify app dev --config <name>`，结束后恢复占位符 |
 | `bshopify app guard` | 阻止真实注入值或持锁状态进入提交 |
 
 未被 bshopify 接管的命令会降级到 Shopify CLI，例如：
@@ -113,7 +113,7 @@ bshopify app init
 `init` 会执行项目结构检查，并在缺失时生成以下内容：
 
 - `bshopify.config.mjs`
-- `.bshopify-tmp/` 的 `.gitignore` 忽略项
+- `.bshopify/` 的 `.gitignore` 忽略项
 - 当前 Git hooks 目录下的 `pre-commit`
 - `extensions/*/__entry.js`
 - `package.json` 中的 `dev`、`deploy` scripts，分别写为 `bshopify app dev` 和 `bshopify app deploy`；已有同名脚本会被替换，并在摘要中提示
@@ -127,6 +127,14 @@ Git hook 写入规则：如果当前项目配置了 `core.hooksPath`，会写入
 ```bash
 bshopify app init --check
 ```
+
+已有项目同步 bshopify 受管文件：
+
+```bash
+bshopify app init --update
+```
+
+`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录 extension entry 路径、推荐 scripts 和 Git hook 路径。`--update` 会读取当前 `bshopify.config.mjs` 和 manifest，先按旧坐标迁移或清理受管资源，再补齐缺失文件并写回 manifest。已有的 `bshopify.config.mjs` 不会被覆盖；`entryFileName` 连续多次改名时，会优先把 manifest 记录的旧 entry rename 到新文件名；`package.json` scripts 在 update 时只补新增命令，不覆盖已有自定义命令；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`。
 
 对指定目录执行初始化：
 
@@ -142,11 +150,15 @@ bshopify app init --cwd ./path/to/shopify-app
 bshopify app dev
 ```
 
-切换 Shopify app config 时，通过 bshopify 自己的 `--config` 参数指定，注入上下文和最终 Shopify CLI 参数会保持一致：
+切换 Shopify app config 时，通过 bshopify 自己的 `--config` 参数选择 `bshopify.config.mjs` 里的 `configFiles` key。bshopify 会读取该 key 对应的 TOML 路径，并从文件名推导最终传给 Shopify CLI 的 config 名，所以注入上下文、summary 和最终 Shopify CLI 参数会保持一致：
 
 ```bash
 bshopify app dev --config test
 ```
+
+`configFiles` 必须指向项目根目录下符合 Shopify CLI 命名规则的文件，例如 `shopify.app.toml` 或 `shopify.app.preview.toml`。例如 `configFiles.test = "shopify.app.preview.toml"` 时，bshopify 会读取 `shopify.app.preview.toml`，并执行 `shopify app dev --config preview` 或 `shopify app deploy --config preview`。
+
+如果配置路径是默认文件 `shopify.app.toml`，bshopify 会读取该文件，并执行不带 `--config` 的 Shopify CLI 命令，例如 `shopify app dev` 或 `shopify app deploy`。
 
 `dev` 默认会在注入值后追加按文件类型生成的 restore marker，结束后只恢复本轮注入的值。若遇到未覆盖的文件类型或注释语法不兼容，可在 `bshopify.config.mjs` 中关闭：
 

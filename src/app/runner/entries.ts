@@ -1,9 +1,9 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { isNodeError } from "#/utils/node";
 import { isRecord, toRequiredString } from "#/utils/objects";
 import { toPosixPath } from "#/utils/paths";
+import { loadExtensionEntryModule } from "./entry-loader";
 import type {
   ExtensionDeployResult,
   ExtensionContext,
@@ -72,7 +72,7 @@ export async function loadExtensionHooks(
   const hooks: PreparedExtensionPlan[] = [];
 
   for (const entry of entries) {
-    const module = await import(`${pathToFileURL(entry.filePath).href}?t=${Date.now()}`);
+    const module = await loadExtensionEntryModule(entry.filePath);
     const lifecycle = module.default;
 
     if (!isLifecycle(lifecycle)) {

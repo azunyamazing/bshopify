@@ -19,8 +19,17 @@ export async function resolveConfigName(
     throw new Error("bshopify configFiles must define at least one deploy target.");
   }
 
+  if (
+    requestedConfigName !== undefined
+    && config.configFiles[requestedConfigName]?.trim()
+  ) {
+    return requestedConfigName;
+  }
+
   if (requestedConfigName !== undefined) {
-    return normalizeConfigName(requestedConfigName);
+    console.warn(
+      `bshopify configFiles.${requestedConfigName} is not configured. Select a deploy config to continue.\n`,
+    );
   }
 
   return select({
@@ -45,10 +54,10 @@ export async function requireProductionConfirmation(
   }
 
   const answer = await input({
-    message: 'Type "production" to confirm production deploy:',
+    message: 'Type "confirm" to continue:',
   });
 
-  if (answer !== "production") {
+  if (answer !== "confirm") {
     throw new Error("Production deploy requires --confirm-production.");
   }
 }
@@ -61,10 +70,6 @@ export function assertShopifyDeployConfig(context: RunnerContextBase): void {
     "application_url",
     context.shopify.applicationUrl,
   );
-}
-
-function normalizeConfigName(configName: string): string {
-  return configName === "prod" ? "production" : configName;
 }
 
 function assertRequiredShopifyField(

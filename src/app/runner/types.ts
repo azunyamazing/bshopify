@@ -23,7 +23,6 @@ export interface RunnerConfig {
   extensionsRoot: string;
   failOnUnresolvedPlaceholders: boolean;
   restoreMarkers: boolean;
-  tmpRoot: string;
 }
 
 export interface ConfigFileMap {
@@ -61,6 +60,7 @@ export type RunnerCommand = "dev" | "deploy" | "dryRun";
 export interface ShopifyContext {
   applicationUrl?: string;
   appName?: string;
+  cliConfigName?: string;
   clientId?: string;
   configFile: string;
   importantConfig: ShopifyImportantConfigItem[];
