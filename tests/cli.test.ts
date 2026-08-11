@@ -561,7 +561,26 @@ describe("bshopify CLI", () => {
     });
   });
 
-  it("dispatches bshopify app dev to the local dev runner", async () => {
+  it("dispatches bare bshopify app dev to the local dev runner with the default config", async () => {
+    const runDev = vi.fn(async () => 0);
+
+    await createCliProgram({ runDev }).parseAsync([
+      "node",
+      "bshopify",
+      "app",
+      "dev",
+      "--cwd",
+      "/tmp/shopify-app",
+    ]);
+
+    expect(runDev).toHaveBeenCalledWith({
+      configName: "dev",
+      cwd: "/tmp/shopify-app",
+      shopifyArgs: [],
+    });
+  });
+
+  it("dispatches bshopify app dev args without forcing the default config", async () => {
     const runDev = vi.fn(async () => 0);
 
     await createCliProgram({ runDev }).parseAsync([
@@ -576,7 +595,7 @@ describe("bshopify CLI", () => {
     ]);
 
     expect(runDev).toHaveBeenCalledWith({
-      configName: "dev",
+      configName: undefined,
       cwd: "/tmp/shopify-app",
       shopifyArgs: ["--reset"],
     });
@@ -880,6 +899,15 @@ describe("devProject", () => {
     await devProject({ cwd, runShopifyCommand });
 
     expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev"]);
+  });
+
+  it("passes dev Shopify args without injecting the default CLI config arg", async () => {
+    const cwd = await createDevProject();
+    const runShopifyCommand = vi.fn(async () => 0);
+
+    await devProject({ cwd, runShopifyCommand, shopifyArgs: ["--reset"] });
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--reset"]);
   });
 
   it("prints the dev placeholder injection details with color", async () => {

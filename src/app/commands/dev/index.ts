@@ -26,6 +26,8 @@ import type { DevOptions, ExtensionContext, ShopifyCommandRunner } from "#/app/r
 export async function devProject(options: DevOptions = {}): Promise<number> {
   const cwd = options.cwd ?? process.cwd();
   const configName = options.configName ?? "dev";
+  const shopifyArgs = options.shopifyArgs ?? [];
+  const shouldForwardCliConfig = options.configName !== undefined || shopifyArgs.length === 0;
   const config = await loadRunnerConfig(cwd);
   const context = await createRunnerContext({
     command: "dev",
@@ -65,7 +67,7 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       }
 
       const injectionSummary = formatAppliedInjections(appliedInjections, {
-        configName: context.shopify.cliConfigName,
+        configName: shouldForwardCliConfig ? context.shopify.cliConfigName : undefined,
         cwd,
       });
 
@@ -82,8 +84,8 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       const exitCode = await runShopifyCommand([
         "app",
         "dev",
-        ...formatShopifyCliConfigArgs(context.shopify.cliConfigName),
-        ...(options.shopifyArgs ?? []),
+        ...(shouldForwardCliConfig ? formatShopifyCliConfigArgs(context.shopify.cliConfigName) : []),
+        ...shopifyArgs,
       ]);
 
       return exitCode ?? 0;
