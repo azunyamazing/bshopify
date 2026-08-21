@@ -62,13 +62,7 @@ export async function initProject(options: InitOptions = {}): Promise<InitResult
   const cleanFilterPath = await writeCleanFilterScript(cwd, result, options.update === true);
   recordCleanFilter(manifest, cleanFilterPath);
   await ensureGitattributesEntry(cwd, result, config.extensionsRoot);
-  const cleanFilterChanged = await configureGitFilters(cwd, result);
-
-  if (cleanFilterChanged) {
-    result.warnings.push(
-      'run "git add --renormalize ." to apply the clean filter to already-tracked files',
-    );
-  }
+  await configureGitFilters(cwd, result);
 
   const previousPreCommitHookPath = options.update === true
     ? manifest.preCommitHook?.path

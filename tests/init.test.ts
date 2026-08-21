@@ -860,9 +860,9 @@ describe("initProject", () => {
     expect(result.skipped).not.toContain(".bshopify/git-add-cleaner.js");
     expect(result.updated).toContain(".gitattributes");
     expect(result.updated).toContain("git config filter.bshopify");
-    expect(result.warnings).toContain(
-      'run "git add --renormalize ." to apply the clean filter to already-tracked files',
-    );
+    // init never rewrites already-tracked files: on first use there are no
+    // bshopify injections to restore, and user edits stay untouched.
+    expect(result.warnings).toEqual([]);
   });
 
   it("does not duplicate the gitattributes entry on re-init", async () => {
