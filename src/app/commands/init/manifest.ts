@@ -9,6 +9,7 @@ import { resolveProjectPath } from "./paths";
 export const manifestFileName = "bshopify.manifest.json";
 
 export interface InitManifest {
+  cleanFilter?: InitManifestPath;
   configFile: string;
   entries: Record<string, InitManifestEntry>;
   gitignore: InitManifestGitignore;
@@ -71,6 +72,10 @@ export function recordPreCommitHook(manifest: InitManifest, path: string | undef
   manifest.preCommitHook = { path };
 }
 
+export function recordCleanFilter(manifest: InitManifest, path: string): void {
+  manifest.cleanFilter = { path };
+}
+
 function createEmptyManifest(): InitManifest {
   return {
     configFile: "bshopify.config.mjs",
@@ -93,6 +98,7 @@ function normalizeManifest(value: unknown): InitManifest {
   }
 
   return {
+    cleanFilter: normalizePathRecord(value.cleanFilter),
     configFile: typeof value.configFile === "string" ? value.configFile : "bshopify.config.mjs",
     entries: normalizeManagedEntries(
       isRecord(value.entries) ? value.entries : value.extensionEntries,

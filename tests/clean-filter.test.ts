@@ -1,0 +1,204 @@
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanFilterScript } from "../src/app/commands/init/constants";
+import { restoreInjectedMarkers } from "../src/app/runner/restore-markers";
+import { createFileMarker, createRestoreMarker } from "../src/utils/markers";
+
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true })));
+});
+
+interface FilterResult {
+  code: number | null;
+  stderr: string;
+  stdout: Buffer;
+}
+
+function runCleanFilter(
+  scriptPath: string,
+  input: string | Buffer,
+  args: string[] = [],
+): Promise<FilterResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("node", [scriptPath, ...args]);
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout.push(chunk);
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr.push(chunk);
+    });
+    child.on("error", reject);
+    child.on("close", (code) =>
+      resolve({
+        code,
+        stderr: Buffer.concat(stderr).toString("utf8"),
+        stdout: Buffer.concat(stdout),
+      }),
+    );
+    child.stdin.end(input);
+  });
+}
+
+function inject(source: string, filePath: string, pattern: string, value: string): string {
+  const marker = createFileMarker(filePath, createRestoreMarker(pattern, value));
+  return source.replace(pattern, `${value}${marker}`);
+}
+
+async function writeCleanFilterScript(): Promise<string> {
+  const cwd = await mkdtemp(join(tmpdir(), "bshopify-filter-"));
+  tempDirs.push(cwd);
+  await mkdir(join(cwd, "scripts"), { recursive: true });
+  const scriptPath = join(cwd, "scripts", "git-add-cleaner.js");
+  await writeFile(scriptPath, cleanFilterScript);
+  return scriptPath;
+}
+
+describe("generated git clean filter script", () => {
+  it("restores injected liquid content to placeholders", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const filePath = "extensions/x/blocks/app-embed.liquid";
+    const source = '{{ "__SHOPIFY_APP_PROXY_BASE__" }}\n';
+    const injected = inject(source, filePath, "__SHOPIFY_APP_PROXY_BASE__", "https://proxy.example.com");
+
+    const result = await runCleanFilter(scriptPath, injected);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toEqual(Buffer.from(source));
+  });
+
+  it("restores injected javascript content to placeholders", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const filePath = "extensions/x/__entry.js";
+    const source = 'const proxyBase = "__SHOPIFY_APP_PROXY_BASE__";\n';
+    const injected = inject(source, filePath, "__SHOPIFY_APP_PROXY_BASE__", "https://proxy.example.com");
+
+    const result = await runCleanFilter(scriptPath, injected);
+
+    expect(result.stdout).toEqual(Buffer.from(source));
+  });
+
+  it("restores multiple injections in one file", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const filePath = "extensions/x/blocks/app-embed.liquid";
+    const source = '{{ "__A__" }}|{{ "__B__" }}\n';
+    const first = inject(source, filePath, "__A__", "aaa");
+    const injected = inject(first, filePath, "__B__", "bbb");
+
+    const result = await runCleanFilter(scriptPath, injected);
+
+    expect(result.stdout).toEqual(Buffer.from(source));
+  });
+
+  it("passes plain files through byte-for-byte", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const plain = "const x = 1;\n// nothing to see here\n";
+
+    const result = await runCleanFilter(scriptPath, plain);
+
+    expect(result.stdout).toEqual(Buffer.from(plain));
+  });
+
+  it("passes binary-looking content through untouched", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const binary = Buffer.from(`\u0000\u0001PNG${"bshopify-restore:not-a-real-marker"}\u0000`, "utf8");
+
+    const result = await runCleanFilter(scriptPath, binary);
+
+    expect(result.stdout).toEqual(binary);
+  });
+
+  it("passes non-UTF-8 text through byte-for-byte", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    // Latin-1 "café" (0xE9) must never be decoded and re-encoded.
+    const latin1 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+
+    const result = await runCleanFilter(scriptPath, latin1);
+
+    expect(result.stdout).toEqual(latin1);
+  });
+
+  it("leaves marker-like text outside any injected value untouched", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const plain = [
+      "// user comment mentioning the format",
+      "// /* bshopify-restore:YWJj:1:aaaaaaaaaaaaaaaa:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb */",
+      "const x = 1;\n",
+    ].join("\n");
+
+    const result = await runCleanFilter(scriptPath, plain);
+
+    expect(result.stdout).toEqual(Buffer.from(plain));
+  });
+
+  it("acts as identity in smudge mode", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const filePath = "extensions/x/blocks/app-embed.liquid";
+    const injected = inject(
+      '{{ "__SHOPIFY_APP_PROXY_BASE__" }}\n',
+      filePath,
+      "__SHOPIFY_APP_PROXY_BASE__",
+      "https://proxy.example.com",
+    );
+
+    const result = await runCleanFilter(scriptPath, injected, ["--smudge"]);
+
+    expect(result.stdout).toEqual(Buffer.from(injected));
+  });
+});
+
+describe("generated script parity with the TS restore", () => {
+  const filePath = "extensions/x/blocks/app-embed.liquid";
+  const cases: Array<[string, string]> = [
+    [
+      "liquid injected",
+      inject('{{ "__SHOPIFY_APP_PROXY_BASE__" }}\n', filePath, "__SHOPIFY_APP_PROXY_BASE__", "https://proxy.example.com"),
+    ],
+    [
+      "js injected",
+      inject('const a = "__A__";\n', "extensions/x/__entry.js", "__A__", "https://example.com"),
+    ],
+    [
+      "jsx injected",
+      inject('const a = "__A__";\n', "extensions/x/B.jsx", "__A__", "https://example.com"),
+    ],
+    [
+      "html injected",
+      inject('<a href="__A__">x</a>\n', "extensions/x/b.html", "__A__", "https://example.com"),
+    ],
+    [
+      "multi-marker",
+      inject(
+        inject('{{ "__A__" }}|{{ "__B__" }}\n', filePath, "__A__", "aaa"),
+        filePath,
+        "__B__",
+        "bbb",
+      ),
+    ],
+    [
+      "unicode",
+      inject("{{ '__代理__' }}\n", filePath, "__代理__", "https://例.com/😀"),
+    ],
+    [
+      "marker-like text outside value",
+      "// /* bshopify-restore:YWJj:1:aaaaaaaaaaaaaaaa:bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb */\nconst x = 1;\n",
+    ],
+    ["plain", "const x = 1;\n"],
+    ["empty", ""],
+  ];
+
+  it.each(cases)("matches the TS restore for %s", async (_label, content) => {
+    const scriptPath = await writeCleanFilterScript();
+    const scriptOut = (await runCleanFilter(scriptPath, content)).stdout.toString("utf8");
+
+    expect(scriptOut).toBe(restoreInjectedMarkers(content));
+  });
+});

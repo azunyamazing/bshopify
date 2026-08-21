@@ -116,7 +116,12 @@ bshopify app init
 - `.bshopify/` 的 `.gitignore` 忽略项
 - 当前 Git hooks 目录下的 `pre-commit`
 - `extensions/*/__entry.js`
+- `.bshopify/git-add-cleaner.js`（Git clean/smudge filter，位于被 ignore 的 `.bshopify/` 下，不随仓库提交）
+- `.gitattributes`（`extensions/** filter=bshopify`）
+- Git local config `filter.bshopify.*`（clean / smudge / required=false）
 - `package.json` 中的 `dev`、`deploy` scripts，分别写为 `bshopify app dev` 和 `bshopify app deploy`；已有同名脚本会被替换，并在摘要中提示
+
+Git clean filter：dev 运行期间扩展文件里的占位符被临时替换成真实值，此时执行 `git add` 会先经过 `git-add-cleaner.js` 把注入值还原成占位符再进暂存区，避免真实 URL/密钥被提交。filter 命令写在本地 `.git/config`（由 `init` 写入），脚本存放在被 ignore 的 `.bshopify/` 下——新 clone 必须跑过 `init` filter 才会生效，`init --update` 会按 CLI 最新模板直接替换脚本。无注入 marker 的文件（含二进制）原样透传；`required` 默认为 `false`，未配置 filter 的机器会静默按原样暂存。首次接入后，对已跟踪文件执行 `git add --renormalize .` 会用清理后的内容重刷暂存区。
 
 Git hook 写入规则：如果当前项目配置了 `core.hooksPath`，会写入该目录；否则写入 Git 默认的 `.git/hooks/pre-commit`。如果 `pre-commit` 已存在，`init` 会在 shebang 后插入带标记的 `bshopify app guard` block，不会覆盖原有 hook 内容。hook 执行时会优先使用项目本地 `./node_modules/.bin/bshopify`，不存在时再回退到 PATH 中的 `bshopify`。
 
@@ -134,7 +139,7 @@ bshopify app init --check
 bshopify app init --update
 ```
 
-`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录受管 entry 路径、推荐 scripts 和 Git hook 路径。`--update` 会读取当前 `bshopify.config.mjs` 和 manifest，先按旧坐标迁移或清理受管资源，再补齐缺失文件并写回 manifest。已有的 `bshopify.config.mjs` 不会被覆盖；entry 文件名属于内部默认（`__entry.js`），若旧配置改过它，`--update` 会按 manifest 记录的旧路径 rename 到新文件名；`package.json` scripts 在 update 时只补新增命令，不覆盖已有自定义命令；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`。
+`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录受管 entry 路径、推荐 scripts、Git hook 路径和 clean filter 脚本路径。`--update` 会读取当前 `bshopify.config.mjs` 和 manifest，先按旧坐标迁移或清理受管资源，再补齐缺失文件并写回 manifest。已有的 `bshopify.config.mjs` 不会被覆盖；entry 文件名属于内部默认（`__entry.js`），若旧配置改过它，`--update` 会按 manifest 记录的旧路径 rename 到新文件名；`package.json` scripts 在 update 时只补新增命令，不覆盖已有自定义命令；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`；clean filter 脚本在 update 时同步为最新模板。
 
 对指定目录执行初始化：
 
@@ -183,7 +188,7 @@ bshopify app dev --config test
 
 如果配置路径是默认文件 `shopify.app.toml`，bshopify 会读取该文件，并执行不带 `--config` 的 Shopify CLI 命令，例如 `shopify app dev` 或 `shopify app deploy`。
 
-`dev` 默认会在注入值后追加按文件类型生成的 restore marker，结束后只恢复本轮注入的值。若遇到未覆盖的文件类型或注释语法不兼容，仍可在 `bshopify.config.mjs` 显式写 `restoreMarkers: false` 关闭（内部默认，向后兼容）：
+`dev` 默认会在注入值后追加按文件类型生成的 restore marker（自描述格式：占位符 + 注入值长度 + 注入值校验和 + 随机串，不包含注入值本身），结束后只恢复本轮注入的值。marker 同时是 Git clean filter 的还原依据，也是进程被杀后恢复的依据。校验和用于只信任真正由 bshopify 写入的 marker：文件里形似 marker 的普通文本、或 dev 期间被手改过的注入值都不会被错误还原。若遇到未覆盖的文件类型或注释语法不兼容，仍可在 `bshopify.config.mjs` 显式写 `restoreMarkers: false` 关闭（内部默认，向后兼容）：
 
 ```js
 export default {
@@ -191,7 +196,7 @@ export default {
 };
 ```
 
-关闭后仍会在 dev 结束时恢复占位符，但恢复会按注入值本身匹配，dev 期间手写的相同值也可能被一起还原。
+关闭后仍会在 dev 结束时恢复占位符，但恢复会按注入值本身匹配，dev 期间手写的相同值也可能被一起还原；且文件不再携带 marker，Git clean filter 将无法在 `git add` 时还原注入文件。
 
 ## 项目结构
 

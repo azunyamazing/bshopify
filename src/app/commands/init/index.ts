@@ -2,6 +2,12 @@ import { runProjectChecks } from "./checks";
 import { bshopifyStateDir } from "#/app/runner/constants";
 import { loadRunnerConfig } from "#/app/runner/config";
 import {
+  checkCleanFilter,
+  configureGitFilters,
+  ensureGitattributesEntry,
+  writeCleanFilterScript,
+} from "./clean-filter";
+import {
   updatePackageScripts,
   writeRunnerConfig,
 } from "./files";
@@ -11,6 +17,7 @@ import { writePreCommitHook } from "./git-hooks";
 import {
   applyRunnerConfigToManifest,
   loadInitManifest,
+  recordCleanFilter,
   recordPreCommitHook,
   saveInitManifest,
 } from "./manifest";
@@ -44,6 +51,7 @@ export async function initProject(options: InitOptions = {}): Promise<InitResult
     configFiles: Object.values(config.configFiles),
     extensionsRoot: config.extensionsRoot,
   });
+  await checkCleanFilter(cwd, result, config.extensionsRoot);
 
   if (options.check || result.errors.length > 0) {
     return result;
@@ -51,6 +59,17 @@ export async function initProject(options: InitOptions = {}): Promise<InitResult
 
   await writeRunnerConfig(cwd, result);
   await ensureGitignoreEntry(cwd, result, bshopifyStateDir);
+  const cleanFilterPath = await writeCleanFilterScript(cwd, result, options.update === true);
+  recordCleanFilter(manifest, cleanFilterPath);
+  await ensureGitattributesEntry(cwd, result, config.extensionsRoot);
+  const cleanFilterChanged = await configureGitFilters(cwd, result);
+
+  if (cleanFilterChanged) {
+    result.warnings.push(
+      'run "git add --renormalize ." to apply the clean filter to already-tracked files',
+    );
+  }
+
   const previousPreCommitHookPath = options.update === true
     ? manifest.preCommitHook?.path
     : undefined;

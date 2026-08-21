@@ -6,6 +6,7 @@ import { join, relative } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { formatInitResult, initProject } from "../src";
+import { createFileMarker, createRestoreMarker } from "../src/utils/markers";
 
 const tempDirs: string[] = [];
 const execFileAsync = promisify(execFile);
@@ -15,6 +16,7 @@ interface FixturePackageJson {
 }
 
 interface FixtureInitManifest {
+  cleanFilter?: { path: string };
   entries: Record<string, { contentHash?: string; path: string }>;
   packageScripts: Record<string, string>;
   preCommitHook?: { path: string };
@@ -817,6 +819,215 @@ describe("initProject", () => {
     expect(result.updated).toContain(
       "removed stale manifest entry extensions/removed-extension",
     );
+  });
+
+  it("writes the git clean filter script, gitattributes entry, and git config", async () => {
+    const cwd = await createTempProject();
+
+    const result = await initProject({ cwd });
+
+    await expect(
+      readFile(join(cwd, ".bshopify", "git-add-cleaner.js"), "utf8"),
+    ).resolves.toContain("bshopify-restore:");
+    await expect(readFile(join(cwd, ".gitattributes"), "utf8")).resolves.toContain(
+      "extensions/** filter=bshopify",
+    );
+
+    const { stdout: clean } = await execFileAsync(
+      "git",
+      ["config", "--get", "filter.bshopify.clean"],
+      { cwd },
+    );
+    const { stdout: smudge } = await execFileAsync(
+      "git",
+      ["config", "--get", "filter.bshopify.smudge"],
+      { cwd },
+    );
+    const { stdout: required } = await execFileAsync(
+      "git",
+      ["config", "--get", "filter.bshopify.required"],
+      { cwd },
+    );
+    expect(clean.trim()).toBe("node .bshopify/git-add-cleaner.js");
+    expect(smudge.trim()).toBe("node .bshopify/git-add-cleaner.js --smudge");
+    expect(required.trim()).toBe("false");
+
+    const manifest = JSON.parse(
+      await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
+    ) as FixtureInitManifest;
+    expect(manifest.cleanFilter?.path).toBe(".bshopify/git-add-cleaner.js");
+    expect(result.created).toContain(".bshopify/git-add-cleaner.js");
+    expect(result.skipped).not.toContain(".bshopify/git-add-cleaner.js");
+    expect(result.updated).toContain(".gitattributes");
+    expect(result.updated).toContain("git config filter.bshopify");
+    expect(result.warnings).toContain(
+      'run "git add --renormalize ." to apply the clean filter to already-tracked files',
+    );
+  });
+
+  it("does not duplicate the gitattributes entry on re-init", async () => {
+    const cwd = await createTempProject();
+
+    await initProject({ cwd });
+    const result = await initProject({ cwd });
+
+    const gitattributes = await readFile(join(cwd, ".gitattributes"), "utf8");
+    expect(gitattributes.match(/extensions\/\*\* filter=bshopify/g)).toHaveLength(1);
+    expect(result.skipped).toContain(".gitattributes");
+    expect(result.skipped).toContain("git config filter.bshopify");
+  });
+
+  it("syncs the clean filter script to the latest template on update", async () => {
+    const cwd = await createTempProject();
+    await initProject({ cwd });
+    const scriptPath = join(cwd, ".bshopify", "git-add-cleaner.js");
+    await writeFile(scriptPath, "// user-tampered\n");
+
+    const result = await initProject({ cwd, update: true });
+
+    const script = await readFile(scriptPath, "utf8");
+    expect(script).toContain("bshopify-restore:");
+    expect(script).not.toContain("user-tampered");
+    expect(result.updated).toContain(".bshopify/git-add-cleaner.js");
+    expect(result.skipped).not.toContain(".bshopify/git-add-cleaner.js");
+  });
+
+  it("keeps a custom clean filter script on plain init", async () => {
+    const cwd = await createTempProject();
+    await mkdir(join(cwd, ".bshopify"), { recursive: true });
+    await writeFile(join(cwd, ".bshopify", "git-add-cleaner.js"), "// custom\n");
+
+    const result = await initProject({ cwd });
+
+    await expect(
+      readFile(join(cwd, ".bshopify", "git-add-cleaner.js"), "utf8"),
+    ).resolves.toBe("// custom\n");
+    expect(result.skipped).toContain(".bshopify/git-add-cleaner.js");
+  });
+
+  it("reports clean filter readiness during check", async () => {
+    const cwd = await createTempProject();
+
+    const before = await initProject({ cwd, check: true });
+    expect(before.checks).toContainEqual({
+      name: "git clean filter",
+      ok: false,
+      message: "bshopify clean filter not configured; run bshopify app init",
+    });
+
+    await initProject({ cwd });
+    const after = await initProject({ cwd, check: true });
+    expect(after.checks).toContainEqual({
+      name: "git clean filter",
+      ok: true,
+      message: "bshopify clean filter configured",
+    });
+  });
+
+  it("reports the clean filter as not configured when the gitattributes line is missing", async () => {
+    const cwd = await createTempProject();
+    await initProject({ cwd });
+    await rm(join(cwd, ".gitattributes"));
+
+    const result = await initProject({ cwd, check: true });
+
+    expect(result.checks).toContainEqual({
+      name: "git clean filter",
+      ok: false,
+      message: "bshopify clean filter not configured; run bshopify app init",
+    });
+  });
+
+  it("stages only the placeholder when an injected file is git added", async () => {
+    const cwd = await createTempProject();
+    await initProject({ cwd });
+
+    const relativePath = "extensions/theme-extension/blocks/app-embed.liquid";
+    const targetPath = join(cwd, relativePath);
+    await mkdir(join(cwd, "extensions", "theme-extension", "blocks"), { recursive: true });
+    const source = '{{ "__SHOPIFY_APP_PROXY_BASE__" }}\n';
+    const marker = createFileMarker(
+      targetPath,
+      createRestoreMarker("__SHOPIFY_APP_PROXY_BASE__", "https://proxy.example.com"),
+    );
+    await writeFile(
+      targetPath,
+      source.replace("__SHOPIFY_APP_PROXY_BASE__", `https://proxy.example.com${marker}`),
+    );
+
+    await execFileAsync("git", ["add", relativePath], { cwd });
+
+    const { stdout } = await execFileAsync("git", ["show", `:${relativePath}`], {
+      cwd,
+      encoding: null,
+    });
+    expect(stdout.toString("utf8")).toBe(source);
+  });
+
+  it("keeps non-UTF-8 extension files byte-identical through git add", async () => {
+    const cwd = await createTempProject();
+    await initProject({ cwd });
+
+    const relativePath = "extensions/theme-extension/blocks/notes.txt";
+    const targetPath = join(cwd, relativePath);
+    await mkdir(join(cwd, "extensions", "theme-extension", "blocks"), { recursive: true });
+    const latin1 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]);
+    await writeFile(targetPath, latin1);
+
+    await execFileAsync("git", ["add", relativePath], { cwd });
+
+    const { stdout } = await execFileAsync("git", ["show", `:${relativePath}`], {
+      cwd,
+      encoding: null,
+    });
+    expect(stdout).toEqual(latin1);
+  });
+
+  it("writes the clean filter script to the repo top level from a subdirectory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bshopify-monorepo-"));
+    tempDirs.push(root);
+    await execFileAsync("git", ["init"], { cwd: root });
+    const app = join(root, "app");
+    await mkdir(join(app, "extensions", "theme-extension"), { recursive: true });
+    await writeFile(join(app, "package.json"), `${JSON.stringify({ scripts: {} })}\n`);
+    await writeFile(join(app, "shopify.app.dev.toml"), "name = \"dev\"\n");
+    await writeFile(join(app, "shopify.app.test.toml"), "name = \"test\"\n");
+    await writeFile(join(app, "shopify.app.production.toml"), "name = \"production\"\n");
+    await writeFile(join(app, ".gitignore"), "node_modules/\n");
+
+    await initProject({ cwd: app });
+
+    await expect(
+      readFile(join(root, ".bshopify", "git-add-cleaner.js"), "utf8"),
+    ).resolves.toContain("bshopify-restore:");
+    const { stdout: clean } = await execFileAsync(
+      "git",
+      ["config", "--get", "filter.bshopify.clean"],
+      { cwd: app },
+    );
+    expect(clean.trim()).toBe("node .bshopify/git-add-cleaner.js");
+
+    // The filter command resolves from the repo top, so staging an injected
+    // file from a subdirectory must still land the placeholder in the index.
+    const relativePath = "app/extensions/theme-extension/blocks/app-embed.liquid";
+    const targetPath = join(app, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    await mkdir(join(app, "extensions", "theme-extension", "blocks"), { recursive: true });
+    const source = '{{ "__SHOPIFY_APP_PROXY_BASE__" }}\n';
+    const marker = createFileMarker(
+      targetPath,
+      createRestoreMarker("__SHOPIFY_APP_PROXY_BASE__", "https://proxy.example.com"),
+    );
+    await writeFile(
+      targetPath,
+      source.replace("__SHOPIFY_APP_PROXY_BASE__", `https://proxy.example.com${marker}`),
+    );
+    await execFileAsync("git", ["add", relativePath], { cwd: root });
+
+    const { stdout } = await execFileAsync("git", ["show", `:${relativePath}`], {
+      cwd: root,
+      encoding: null,
+    });
+    expect(stdout.toString("utf8")).toBe(source);
   });
 
   it("checks project readiness without writing files", async () => {

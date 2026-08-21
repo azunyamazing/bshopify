@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { isRecord } from "#/utils/objects";
 import { isNodeError } from "#/utils/node";
+import { restoreInjectedMarkers } from "./restore-markers";
 import type { FileTransaction, HiddenFile, ReverseReplacement, TrackedFile } from "./types";
 
 interface FileTransactionJournal {
@@ -58,6 +59,14 @@ async function restoreTrackedFiles(files: TrackedFile[]): Promise<void> {
   for (const file of files.slice().reverse()) {
     let content = await readFile(file.path, "utf8");
 
+    // Primary restore path: reverse the injections recorded in the file
+    // itself. This works even when the journal is lost or stale (e.g. a
+    // killed dev process), because the marker carries the full record.
+    content = restoreInjectedMarkers(content);
+
+    // Journal fallback for injections written without markers (legacy
+    // restoreMarkers: false runs). No-op when the marker path already
+    // restored the same injection.
     for (const replacement of file.replacements.slice().reverse()) {
       const restoreTarget =
         replacement.marker === undefined
