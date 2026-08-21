@@ -45,8 +45,6 @@ function reconcileRunnerConfigSource(source: string): string | undefined {
 function mergeRunnerConfigBody(body: string): string {
   const cleaned = body.replace(/\s+$/, "");
   const additions = [
-    ["extensionsRoot", '  extensionsRoot: "extensions",'],
-    ["entryFileName", '  entryFileName: "__entry.js",'],
     ["configFiles", [
       "  configFiles: {",
       '    dev: "shopify.app.dev.toml",',
@@ -55,7 +53,6 @@ function mergeRunnerConfigBody(body: string): string {
       "  },",
     ].join("\n")],
     ["failOnUnresolvedPlaceholders", "  failOnUnresolvedPlaceholders: true,"],
-    ["restoreMarkers", "  restoreMarkers: true,"],
   ] as const;
   const nextParts = [cleaned];
 

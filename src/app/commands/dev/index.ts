@@ -3,11 +3,11 @@ import { bshopifyStateDir } from "#/app/runner/constants";
 import { formatShopifyCliConfigArgs, loadRunnerConfig } from "#/app/runner/config";
 import { createRunnerContext } from "#/app/runner/context";
 import {
-  findExtensionEntries,
-  loadExtensionHooks,
+  findManagedEntries,
+  loadManagedEntryHooks,
   preparePlans,
   validatePlans,
-} from "#/app/runner/entries";
+} from "#/extension/entries";
 import {
   applyInjections,
   assertNoUnresolvedPlaceholders,
@@ -21,7 +21,7 @@ import {
 } from "#/app/runner/transaction";
 import { ansi, colorize } from "#/utils/output";
 import type { AppliedInjection } from "#/app/runner/injections";
-import type { DevOptions, ExtensionContext, ShopifyCommandRunner } from "#/app/runner/types";
+import type { DevOptions } from "#/app/runner/types";
 
 export async function devProject(options: DevOptions = {}): Promise<number> {
   const cwd = options.cwd ?? process.cwd();
@@ -48,8 +48,11 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       );
     }
 
-    const entries = await findExtensionEntries(cwd, config);
-    const hooks = await loadExtensionHooks(entries);
+    const entries = await findManagedEntries(cwd, {
+      entryFileName: config.entryFileName,
+      extensionsRoot: config.extensionsRoot,
+    });
+    const hooks = await loadManagedEntryHooks(entries);
     const plans = await preparePlans(context, hooks);
     await validatePlans(context, plans);
 

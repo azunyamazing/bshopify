@@ -14,6 +14,8 @@ export const defaultRunnerConfig: RunnerConfig = {
     test: "shopify.app.test.toml",
     production: "shopify.app.production.toml",
   },
+  // Internal defaults: not exposed in generated configs, but still loadable
+  // from existing configs for backward compatibility.
   entryFileName: "__entry.js",
   extensionsRoot: "extensions",
   failOnUnresolvedPlaceholders: true,

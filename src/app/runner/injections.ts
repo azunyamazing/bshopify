@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveExtensionPath } from "#/app/utils/extensions";
+import { resolveExtensionPath } from "#/extension/paths";
+import type { PreparedExtensionPlan } from "#/extension/types";
 import { findFilesByExtension } from "#/utils/files";
 import { createFileMarker } from "#/utils/markers";
 import { formatPath } from "#/utils/paths";
 import { ansi, colorize } from "#/utils/output";
-import type { FileTransaction, PreparedExtensionPlan } from "./types";
+import type { FileTransaction } from "./types";
 
 const restoreMarkerPrefix = "bshopify-restore";
 const unresolvedPlaceholderPattern = /__[A-Z0-9_]+__/g;

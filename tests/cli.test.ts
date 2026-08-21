@@ -33,7 +33,7 @@ import {
   runShopifyCommand,
   runCli,
 } from "../src";
-import { findExtensionEntries, loadExtensionHooks } from "../src/app/runner/entries";
+import { findManagedEntries, loadManagedEntryHooks } from "../src/extension/entries";
 import { defaultRunnerConfig } from "../src/app/runner/config";
 
 interface CommandWithRuntimeHiddenFlag {
@@ -427,8 +427,8 @@ describe("bshopify CLI", () => {
     const rootUtilsSourceFiles = await readSourceFiles(
       join(process.cwd(), "src", "utils"),
     );
-    const appUtilsSourceFiles = await readSourceFiles(
-      join(process.cwd(), "src", "app", "utils"),
+    const extensionSourceFiles = await readSourceFiles(
+      join(process.cwd(), "src", "extension"),
     );
     const runnerSourceFiles = await readSourceFiles(
       join(process.cwd(), "src", "app", "runner"),
@@ -444,7 +444,7 @@ describe("bshopify CLI", () => {
     );
     const oversizedFiles = [
       ...rootUtilsSourceFiles,
-      ...appUtilsSourceFiles,
+      ...extensionSourceFiles,
       ...runnerSourceFiles,
       ...deploySourceFiles,
       ...devSourceFiles,
@@ -464,18 +464,31 @@ describe("bshopify CLI", () => {
         join(process.cwd(), "src", "utils", "paths.ts"),
       ]),
     );
-    expect(appUtilsSourceFiles.map((file) => file.path).sort()).toEqual([
-      join(process.cwd(), "src", "app", "utils", "extensions.ts"),
-    ]);
+    expect(extensionSourceFiles.map((file) => file.path).sort()).toEqual(
+      expect.arrayContaining([
+        join(process.cwd(), "src", "extension", "context.ts"),
+        join(process.cwd(), "src", "extension", "entries.ts"),
+        join(process.cwd(), "src", "extension", "entry-loader.ts"),
+        join(process.cwd(), "src", "extension", "manage-content.ts"),
+        join(process.cwd(), "src", "extension", "manage-stale.ts"),
+        join(process.cwd(), "src", "extension", "manage.ts"),
+        join(process.cwd(), "src", "extension", "paths.ts"),
+        join(process.cwd(), "src", "extension", "types.ts"),
+      ]),
+    );
+    await expect(stat(join(process.cwd(), "src", "app", "utils", "extensions.ts"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(join(process.cwd(), "src", "app", "runner", "utils.ts"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(join(process.cwd(), "src", "app", "runner", "markers.ts"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(stat(join(process.cwd(), "src", "app", "utils.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(process.cwd(), "src", "app", "runner", "entries.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(process.cwd(), "src", "app", "runner", "entry-loader.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(process.cwd(), "src", "app", "commands", "init", "extension-entries.ts"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(process.cwd(), "src", "app", "commands", "init", "extension-entry-content.ts"))).rejects.toMatchObject({ code: "ENOENT" });
 
     expect(runnerSourceFiles.map((file) => file.path).sort()).toEqual(
       expect.arrayContaining([
         join(process.cwd(), "src", "app", "runner", "config.ts"),
         join(process.cwd(), "src", "app", "runner", "context.ts"),
-        join(process.cwd(), "src", "app", "runner", "entries.ts"),
         join(process.cwd(), "src", "app", "runner", "injections.ts"),
         join(process.cwd(), "src", "app", "runner", "lock.ts"),
         join(process.cwd(), "src", "app", "runner", "shopify.ts"),
@@ -693,7 +706,7 @@ describe("devProject", () => {
     tempDirs.push(cwd);
     const emittedWarnings: EmittedWarning[] = [];
     const emitWarning = vi.spyOn(process, "emitWarning").mockImplementation(
-      ((warning: string | Error, options?: string | NodeJS.EmitWarningOptions) => {
+      ((_warning: string | Error, options?: string | NodeJS.EmitWarningOptions) => {
         emittedWarnings.push({
           code: typeof options === "object" ? options.code : undefined,
         });
@@ -708,9 +721,12 @@ describe("devProject", () => {
     );
 
     try {
-      const entries = await findExtensionEntries(cwd, defaultRunnerConfig);
+      const entries = await findManagedEntries(cwd, {
+        entryFileName: defaultRunnerConfig.entryFileName,
+        extensionsRoot: defaultRunnerConfig.extensionsRoot,
+      });
 
-      await loadExtensionHooks(entries);
+      await loadManagedEntryHooks(entries);
     } finally {
       emitWarning.mockRestore();
     }
@@ -743,8 +759,11 @@ describe("devProject", () => {
       ].join("\n"),
     );
 
-    const entries = await findExtensionEntries(cwd, defaultRunnerConfig);
-    const hooks = await loadExtensionHooks(entries);
+    const entries = await findManagedEntries(cwd, {
+      entryFileName: defaultRunnerConfig.entryFileName,
+      extensionsRoot: defaultRunnerConfig.extensionsRoot,
+    });
+    const hooks = await loadManagedEntryHooks(entries);
 
     expect(hooks).toHaveLength(1);
   });

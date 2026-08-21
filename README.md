@@ -134,13 +134,36 @@ bshopify app init --check
 bshopify app init --update
 ```
 
-`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录 extension entry 路径、推荐 scripts 和 Git hook 路径。`--update` 会读取当前 `bshopify.config.mjs` 和 manifest，先按旧坐标迁移或清理受管资源，再补齐缺失文件并写回 manifest。已有的 `bshopify.config.mjs` 不会被覆盖；`entryFileName` 连续多次改名时，会优先把 manifest 记录的旧 entry rename 到新文件名；`package.json` scripts 在 update 时只补新增命令，不覆盖已有自定义命令；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`。
+`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录受管 entry 路径、推荐 scripts 和 Git hook 路径。`--update` 会读取当前 `bshopify.config.mjs` 和 manifest，先按旧坐标迁移或清理受管资源，再补齐缺失文件并写回 manifest。已有的 `bshopify.config.mjs` 不会被覆盖；entry 文件名属于内部默认（`__entry.js`），若旧配置改过它，`--update` 会按 manifest 记录的旧路径 rename 到新文件名；`package.json` scripts 在 update 时只补新增命令，不覆盖已有自定义命令；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`。
 
 对指定目录执行初始化：
 
 ```bash
 bshopify app init --cwd ./path/to/shopify-app
 ```
+
+## 配置
+
+项目接入后由 `init` 生成 `bshopify.config.mjs`,按 app / extension 两段组织,只暴露团队需要关心的字段:
+
+```js
+export default {
+  // --- App: Shopify app config files by environment ---
+  configFiles: {
+    dev: "shopify.app.dev.toml",
+    test: "shopify.app.test.toml",
+    production: "shopify.app.production.toml",
+  },
+
+  // --- Extension: injection behavior ---
+  failOnUnresolvedPlaceholders: true,
+};
+```
+
+- `configFiles`(app 级):环境名到项目根目录 Shopify app TOML 的映射,`bshopify app dev/deploy --config <name>` 按此选择。
+- `failOnUnresolvedPlaceholders`(extension 级):注入后若目标文件残留模板占位符则报错的行为开关。
+
+`extensionsRoot`、`entryFileName`、`restoreMarkers` 是内部默认(分别为 `extensions`、`__entry.js`、`true`),新项目不再写入配置文件;已有配置仍可覆盖,用于向后兼容。`init --update` 合并时只补齐 `configFiles`、`failOnUnresolvedPlaceholders`,不会覆盖用户已有的同名字段。
 
 ## dev 命令
 
@@ -160,7 +183,7 @@ bshopify app dev --config test
 
 如果配置路径是默认文件 `shopify.app.toml`，bshopify 会读取该文件，并执行不带 `--config` 的 Shopify CLI 命令，例如 `shopify app dev` 或 `shopify app deploy`。
 
-`dev` 默认会在注入值后追加按文件类型生成的 restore marker，结束后只恢复本轮注入的值。若遇到未覆盖的文件类型或注释语法不兼容，可在 `bshopify.config.mjs` 中关闭：
+`dev` 默认会在注入值后追加按文件类型生成的 restore marker，结束后只恢复本轮注入的值。若遇到未覆盖的文件类型或注释语法不兼容，仍可在 `bshopify.config.mjs` 显式写 `restoreMarkers: false` 关闭（内部默认，向后兼容）：
 
 ```js
 export default {
@@ -178,21 +201,32 @@ src/
   main.ts          # CLI program 工厂、fallback 分发和 Shopify CLI 透传
   index.ts         # package 对外导出面
   utils/           # 根通用能力：配置读取、package.json、路径、文件、对象校验、终端输出等
-  app/
-    commands/      # app 域命令入口；负责参数解析、依赖注入和命令编排
+  app/             # app 域（编排层）：Shopify app 是 extension 的上级，负责整个项目的命令编排
+    commands/      # app 子命令入口；负责参数解析、依赖注入和命令编排
       index.ts     # app 子命令注册和 app 层 fallback 判断
       dev/         # app dev 编排入口
-      init/        # app init 初始化流程，按 checks/files/git-hooks/paths/types 拆分
-    runner/        # app dev/deploy 可复用 runner 能力：上下文、配置、entries、注入、锁、事务、Shopify CLI 调用
-    utils/         # app 域共享工具，例如 Extension 路径处理
+      deploy/      # app deploy 编排入口
+      init/        # app init 初始化流程，按 checks/files/git-hooks/manifest/types 拆分
+    runner/        # app 运行管线：上下文、配置、锁、事务、注入执行、Shopify CLI 调用
+  extension/       # extension 域（受管单元层）：Shopify extension 及其 entry，只被 app 依赖
+    types.ts       # ExtensionInfo / ExtensionLifecycle / ManagedEntry 等扩展域类型
+    entries.ts     # 扩展发现 + entry 加载 + 生命周期编排（prepare/validate/beforeDeploy/...）
+    entry-loader.ts# 运行时加载扩展 entry 模块
+    context.ts     # 由 app 上下文派生单扩展上下文（app × extension 组合点）
+    manage.ts      # init 时的 entry 写入/清理/重命名（与 app 通过结构化类型解耦）
+    manage-stale.ts# entry 旧坐标清理与重命名
+    manage-content.ts # entry 模板与内容哈希
+    paths.ts       # 注入目标路径安全校验
 tests/
-  cli.test.ts      # CLI 元信息、命令面、fallback、目录结构和 dev 行为测试
+  cli.test.ts      # CLI 元信息、命令面、fallback、目录结构和 dev/deploy 行为测试
   init.test.ts     # init 文件生成和 check 行为测试
 ```
 
-目录边界上，根 `src/utils/` 只放与 Shopify app 域无关的通用能力；`src/app/utils/` 放 app 域内多个模块会共用的方法；具体命令目录只保留该命令自己的编排和局部细节。
+层级上，Shopify 的项目模型是 app 包含 extension（`extensions/` 是其子目录），所以代码也按 "app 编排层 > extension 受管单元层" 组织：运行期只由 `src/app/` 依赖 `src/extension/`，extension 域不反向依赖 app 的运行逻辑（仅 context 组合点使用 app 的上下文类型）。`Entry`（`__entry.js`，bshopify 受管文件）与 `Extension`（Shopify 扩展）在类型与命名上区分开：`ManagedEntry` 表示前者，`ExtensionInfo` 表示后者。
 
-跨层级引用优先使用 `#/*` 路径别名，例如 `#/utils/node`、`#/app/runner/config`；同目录或相邻模块可以继续使用相对路径。
+目录边界上，根 `src/utils/` 只放与 Shopify app 域无关的通用能力；`src/app/` 放 app 域编排；`src/extension/` 放扩展域受管单元；具体命令目录只保留该命令自己的编排和局部细节。
+
+跨层级引用优先使用 `#/*` 路径别名，例如 `#/utils/node`、`#/app/runner/config`、`#/extension/entries`；同目录或相邻模块可以继续使用相对路径。
 
 ## 验证
 

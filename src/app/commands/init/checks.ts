@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { access, readdir } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { isNodeError } from "#/utils/node";
 import type { InitResult } from "./types";
@@ -24,25 +24,6 @@ export async function runProjectChecks(
 
   for (const fileName of options.configFiles) {
     await checkPath(cwd, fileName, `found ${fileName}`, result);
-  }
-}
-
-export async function readExtensionNames(
-  cwd: string,
-  extensionsRoot = "extensions",
-): Promise<string[]> {
-  try {
-    const entries = await readdir(join(cwd, extensionsRoot), { withFileTypes: true });
-    return entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort();
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return [];
-    }
-
-    throw error;
   }
 }
 

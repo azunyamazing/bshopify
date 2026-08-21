@@ -5,7 +5,7 @@ import {
   updatePackageScripts,
   writeRunnerConfig,
 } from "./files";
-import { writeExtensionEntries } from "./extension-entries";
+import { writeManagedEntries } from "#/extension/manage";
 import { ensureGitignoreEntry } from "./gitignore";
 import { writePreCommitHook } from "./git-hooks";
 import {
@@ -56,7 +56,16 @@ export async function initProject(options: InitOptions = {}): Promise<InitResult
     : undefined;
   const preCommitHookPath = await writePreCommitHook(cwd, result, previousPreCommitHookPath);
   recordPreCommitHook(manifest, preCommitHookPath);
-  await writeExtensionEntries(cwd, result, config, options.update === true, manifest);
+  await writeManagedEntries(
+    cwd,
+    result,
+    {
+      entryFileName: config.entryFileName,
+      extensionsRoot: config.extensionsRoot,
+    },
+    options.update === true,
+    manifest,
+  );
   await updatePackageScripts(cwd, result, options.update === true);
   applyRunnerConfigToManifest(manifest);
   await saveInitManifest(cwd, manifest);

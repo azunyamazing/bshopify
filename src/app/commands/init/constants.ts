@@ -1,11 +1,4 @@
 export const configFileName = "bshopify.config.mjs";
-export const entryFileName = "__entry.js";
-
-export const requiredShopifyConfigFiles = [
-  "shopify.app.dev.toml",
-  "shopify.app.test.toml",
-  "shopify.app.production.toml",
-];
 
 export const recommendedScripts: Record<string, string> = {
   dev: "bshopify app dev",
@@ -13,55 +6,22 @@ export const recommendedScripts: Record<string, string> = {
 };
 
 export const runnerConfigTemplate = `// bshopify runner config
-// This file controls how bshopify discovers Shopify extensions and config files.
+// This file controls how bshopify selects Shopify app config files and how
+// extension injections behave during dev and deploy.
+
 export default {
-  // Directory that contains Shopify extension folders.
-  extensionsRoot: "extensions",
-
-  // Business-side extension entry file generated under each extension.
-  entryFileName: "__entry.js",
-
-  // Shopify app config files by environment.
+  // --- App: Shopify app config files by environment ---
   configFiles: {
     dev: "shopify.app.dev.toml",
     test: "shopify.app.test.toml",
     production: "shopify.app.production.toml",
   },
 
+  // --- Extension: injection behavior ---
   // Fail when an injection plan leaves template placeholders unresolved.
   failOnUnresolvedPlaceholders: true,
-
-  // Add file-type-aware restore comments during dev so cleanup only reverts injected values.
-  // Set to false as an escape hatch if a target file type cannot safely contain comments.
-  restoreMarkers: true,
 };
 `;
-
-export const extensionEntryTemplate = `export default {
-  async prepare(ctx) {
-    return {
-      extension: ctx.extension.name,
-      injections: [
-        // {
-        //   file: "blocks/app-embed.liquid",
-        //   strategy: "replace",
-        //   pattern: "__SHOPIFY_APP_PROXY_BASE__",
-        //   value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,
-        // },
-      ],
-    };
-  },
-
-  async validate(ctx, plan) {},
-
-  async beforeDeploy(ctx, plan, plans) {},
-
-  async afterDeploy(ctx, result) {},
-
-  async onError(ctx, error) {},
-};
-`;
-
 export const legacyPreCommitGuardCommand = "bshopify guard";
 export const legacyPreCommitGuardEndMarker = "# bshopify guard end";
 export const legacyPreCommitGuardStartMarker = "# bshopify guard start";

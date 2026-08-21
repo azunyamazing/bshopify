@@ -1,25 +1,36 @@
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { RunnerContextBase } from "#/app/runner/types";
 import { isNodeError } from "#/utils/node";
 import { isRecord, toRequiredString } from "#/utils/objects";
 import { toPosixPath } from "#/utils/paths";
-import { loadExtensionEntryModule } from "./entry-loader";
+import { createExtensionContext } from "./context";
+import { loadManagedEntryModule } from "./entry-loader";
 import type {
   ExtensionDeployResult,
-  ExtensionContext,
-  ExtensionEntry,
   ExtensionLifecycle,
   InjectionPlan,
+  ManagedEntry,
   PreparedExtensionPlan,
-  RunnerContextBase,
-  RunnerConfig,
 } from "./types";
 
-export async function findExtensionEntries(
+export interface ManagedEntryDiscoveryOptions {
+  entryFileName: string;
+  extensionsRoot: string;
+}
+
+/**
+ * Discovers Shopify extension directories under the extensions root and
+ * returns the bshopify-managed entry files that exist inside them.
+ *
+ * Discovery is split from `loadManagedEntryHooks` so the two concepts stay
+ * distinct: extensions are Shopify artifacts, entry files are bshopify ones.
+ */
+export async function findManagedEntries(
   cwd: string,
-  config: RunnerConfig,
-): Promise<ExtensionEntry[]> {
-  const extensionsRoot = join(cwd, config.extensionsRoot);
+  options: ManagedEntryDiscoveryOptions,
+): Promise<ManagedEntry[]> {
+  const extensionsRoot = join(cwd, options.extensionsRoot);
 
   try {
     await stat(extensionsRoot);
@@ -32,7 +43,7 @@ export async function findExtensionEntries(
   }
 
   const entries = await readdir(extensionsRoot, { withFileTypes: true });
-  const extensionEntries: ExtensionEntry[] = [];
+  const managedEntries: ManagedEntry[] = [];
 
   for (const entry of entries) {
     if (!entry.isDirectory()) {
@@ -40,7 +51,7 @@ export async function findExtensionEntries(
     }
 
     const extensionRoot = join(extensionsRoot, entry.name);
-    const entryPath = join(extensionRoot, config.entryFileName);
+    const entryPath = join(extensionRoot, options.entryFileName);
 
     try {
       await stat(entryPath);
@@ -52,7 +63,7 @@ export async function findExtensionEntries(
       throw error;
     }
 
-    extensionEntries.push({
+    managedEntries.push({
       extension: {
         name: entry.name,
         root: extensionRoot,
@@ -61,18 +72,18 @@ export async function findExtensionEntries(
     });
   }
 
-  return extensionEntries.sort((left, right) =>
+  return managedEntries.sort((left, right) =>
     left.extension.name.localeCompare(right.extension.name),
   );
 }
 
-export async function loadExtensionHooks(
-  entries: ExtensionEntry[],
+export async function loadManagedEntryHooks(
+  entries: ManagedEntry[],
 ): Promise<PreparedExtensionPlan[]> {
   const hooks: PreparedExtensionPlan[] = [];
 
   for (const entry of entries) {
-    const module = await loadExtensionEntryModule(entry.filePath);
+    const module = await loadManagedEntryModule(entry.filePath);
     const lifecycle = module.default;
 
     if (!isLifecycle(lifecycle)) {
@@ -154,19 +165,6 @@ export async function runOnErrorHooks(
   for (const plan of plans) {
     await plan.hooks.onError?.(createExtensionContext(context, plan.entry), error);
   }
-}
-
-function createExtensionContext(
-  context: RunnerContextBase,
-  entry: ExtensionEntry,
-): ExtensionContext {
-  return {
-    ...context,
-    extension: {
-      name: entry.extension.name,
-      root: toPosixPath(entry.extension.root),
-    },
-  };
 }
 
 function normalizeInjection(value: unknown): InjectionPlan {

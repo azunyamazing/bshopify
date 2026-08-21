@@ -1,10 +1,10 @@
 import { join } from "node:path";
 import { isInsidePath } from "#/utils/paths";
 
-export function normalizePathPart(value: string): string {
-  return value.trim().replace(/^\/+|\/+$/g, "");
-}
-
+/**
+ * Resolves an injection target file inside an extension root, rejecting any
+ * path that would escape the extension directory.
+ */
 export function resolveExtensionPath(extensionRoot: string, file: string): string {
   const targetPath = join(extensionRoot, file);
 

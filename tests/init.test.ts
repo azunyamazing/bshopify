@@ -15,7 +15,7 @@ interface FixturePackageJson {
 }
 
 interface FixtureInitManifest {
-  extensionEntries: Record<string, { contentHash?: string; path: string }>;
+  entries: Record<string, { contentHash?: string; path: string }>;
   packageScripts: Record<string, string>;
   preCommitHook?: { path: string };
   version: number;
@@ -93,9 +93,11 @@ describe("initProject", () => {
 
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
     expect(runnerConfig).toContain("// bshopify runner config");
-    expect(runnerConfig).toContain("// Shopify app config files by environment.");
-    expect(runnerConfig).toContain("extensionsRoot");
-    expect(runnerConfig).toContain("restoreMarkers: true");
+    expect(runnerConfig).toContain("Shopify app config files by environment");
+    expect(runnerConfig).toContain("configFiles:");
+    expect(runnerConfig).toContain("failOnUnresolvedPlaceholders: true");
+    expect(runnerConfig).not.toContain("restoreMarkers");
+    expect(runnerConfig).not.toContain("extensionsRoot");
     expect(runnerConfig).not.toContain("tmpRoot");
     expect(runnerConfig).not.toContain("hideEntryBeforeDeploy");
     await expect(readFile(join(cwd, ".gitignore"), "utf8")).resolves.toContain(
@@ -145,9 +147,43 @@ describe("initProject", () => {
     expect(manifest.packageScripts.dev).toBe("bshopify app dev");
     expect(manifest.packageScripts.deploy).toBe("bshopify app deploy");
     expect(manifest.preCommitHook?.path).toBe(".git/hooks/pre-commit");
-    expect(manifest.extensionEntries["theme-extension"]?.path).toBe(
+    expect(manifest.entries["theme-extension"]?.path).toBe(
       "extensions/theme-extension/__entry.js",
     );
+  });
+
+  it("migrates legacy extensionEntries manifest keys to entries on update", async () => {
+    const cwd = await createTempProject();
+    await initProject({ cwd });
+    await writeFile(
+      join(cwd, ".bshopify", "bshopify.manifest.json"),
+      `${JSON.stringify(
+        {
+          configFile: "bshopify.config.mjs",
+          extensionEntries: {
+            "theme-extension": {
+              contentHash: "legacy-hash",
+              path: "extensions/theme-extension/__entry.js",
+            },
+          },
+          gitignore: { path: ".gitignore" },
+          packageScripts: {},
+          version: 1,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await initProject({ cwd, update: true });
+    const manifest = JSON.parse(
+      await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
+    ) as FixtureInitManifest;
+
+    expect(manifest.entries["theme-extension"]?.path).toBe(
+      "extensions/theme-extension/__entry.js",
+    );
+    expect(manifest).not.toHaveProperty("extensionEntries");
   });
 
   it("inserts guard block near the top of an existing pre-commit hook", async () => {
@@ -290,7 +326,7 @@ describe("initProject", () => {
       `${JSON.stringify(
         {
           configFile: "bshopify.config.mjs",
-          extensionEntries: {},
+          entries: {},
           gitignore: { path: ".gitignore" },
           packageScripts: {},
           preCommitHook: { path: ".git/hooks/pre-commit" },
@@ -391,7 +427,7 @@ describe("initProject", () => {
     await expect(
       readFile(join(cwd, "extensions", "theme-extension", "entry.mjs"), "utf8"),
     ).resolves.toContain("async prepare(ctx)");
-    expect(manifest.extensionEntries["theme-extension"]?.path).toBe(
+    expect(manifest.entries["theme-extension"]?.path).toBe(
       "extensions/theme-extension/entry.mjs",
     );
     expect(result.created).toContain("extensions/theme-extension/entry.mjs");
@@ -414,10 +450,10 @@ describe("initProject", () => {
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
 
     expect(runnerConfig).toContain('entryFileName: "entry.mjs"');
-    expect(runnerConfig).toContain('extensionsRoot: "extensions"');
+    expect(runnerConfig).not.toContain("extensionsRoot:");
     expect(runnerConfig).toContain("configFiles:");
     expect(runnerConfig).toContain("failOnUnresolvedPlaceholders: true");
-    expect(runnerConfig).toContain("restoreMarkers: true");
+    expect(runnerConfig).not.toContain("restoreMarkers");
     expect(runnerConfig).not.toContain("hideEntryBeforeDeploy");
     expect(runnerConfig).toContain('customField: "kept"');
     expect(result.updated).toContain("bshopify.config.mjs");
@@ -444,7 +480,8 @@ describe("initProject", () => {
     expect(runnerConfig).toContain("  custom: {");
     expect(runnerConfig).toContain("    restoreMarkers: false,");
     expect(runnerConfig).toContain("\n  configFiles: {");
-    expect(runnerConfig).toContain("\n  restoreMarkers: true,");
+    expect(runnerConfig).toContain("\n  failOnUnresolvedPlaceholders: true,");
+    expect(runnerConfig).not.toContain("\n  restoreMarkers: true,");
   });
 
   it("merges runner config fields after block comments with braces", async () => {
@@ -613,7 +650,7 @@ describe("initProject", () => {
       await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
     ) as FixtureInitManifest;
 
-    expect(manifest.extensionEntries["theme-extension"]).toBeUndefined();
+    expect(manifest.entries["theme-extension"]).toBeUndefined();
     expect(result.updated).toContain(
       "removed stale generated entry extensions/theme-extension/__entry.js",
     );
@@ -656,7 +693,7 @@ describe("initProject", () => {
     expect(result.warnings).toContain(
       "custom stale entry left in place: extensions/theme-extension/entry-a.mjs",
     );
-    expect(manifest.extensionEntries["theme-extension"]?.path).toBe(
+    expect(manifest.entries["theme-extension"]?.path).toBe(
       "extensions/theme-extension/entry-a.mjs",
     );
   });
@@ -702,7 +739,7 @@ describe("initProject", () => {
       `${JSON.stringify(
         {
           ...manifest,
-          extensionEntries: {
+          entries: {
             "theme-extension": {
               contentHash: oldGeneratedHash,
               path: "extensions/theme-extension/__entry.js",
@@ -738,7 +775,7 @@ describe("initProject", () => {
       `${JSON.stringify(
         {
           configFile: "bshopify.config.mjs",
-          extensionEntries: {
+          entries: {
             "theme-extension": {
               path: relative(cwd, outsideEntry),
             },
@@ -776,7 +813,7 @@ describe("initProject", () => {
       await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
     ) as FixtureInitManifest;
 
-    expect(manifest.extensionEntries["removed-extension"]).toBeUndefined();
+    expect(manifest.entries["removed-extension"]).toBeUndefined();
     expect(result.updated).toContain(
       "removed stale manifest entry extensions/removed-extension",
     );
@@ -805,6 +842,9 @@ describe("initProject", () => {
     const result = await initProject({ cwd });
 
     await expect(readFile(join(cwd, "bshopify.config.mjs"), "utf8")).resolves.toContain(
+      "configFiles:",
+    );
+    await expect(readFile(join(cwd, "bshopify.config.mjs"), "utf8")).resolves.not.toContain(
       "extensionsRoot",
     );
     expect(result.checks).not.toContainEqual({

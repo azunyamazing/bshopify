@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { getShopifyCliConfigName, loadShopifyAppConfig } from "./config";
 import type { RunnerCommand, RunnerConfig, RunnerContextBase } from "./types";
-import { normalizePathPart } from "../utils/extensions";
+import { normalizePathPart } from "#/utils/paths";
 
 export interface CreateRunnerContextOptions {
   cwd: string;

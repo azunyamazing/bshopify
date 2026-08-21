@@ -4,20 +4,20 @@ import { bshopifyStateDir } from "#/app/runner/constants";
 import { isNodeError } from "#/utils/node";
 import { isRecord, toStringRecord } from "#/utils/objects";
 import { recommendedScripts } from "./constants";
-import { resolveProjectPath, toDisplayPath } from "./paths";
+import { resolveProjectPath } from "./paths";
 
 export const manifestFileName = "bshopify.manifest.json";
 
 export interface InitManifest {
   configFile: string;
-  extensionEntries: Record<string, InitManifestExtensionEntry>;
+  entries: Record<string, InitManifestEntry>;
   gitignore: InitManifestGitignore;
   packageScripts: Record<string, string>;
   preCommitHook?: InitManifestPath;
   version: number;
 }
 
-export interface InitManifestExtensionEntry {
+export interface InitManifestEntry {
   contentHash?: string;
   path: string;
 }
@@ -71,23 +71,10 @@ export function recordPreCommitHook(manifest: InitManifest, path: string | undef
   manifest.preCommitHook = { path };
 }
 
-export function recordExtensionEntry(
-  manifest: InitManifest,
-  extensionName: string,
-  cwd: string,
-  absolutePath: string,
-  contentHash?: string,
-): void {
-  manifest.extensionEntries[extensionName] = {
-    ...(contentHash === undefined ? {} : { contentHash }),
-    path: toDisplayPath(cwd, absolutePath),
-  };
-}
-
 function createEmptyManifest(): InitManifest {
   return {
     configFile: "bshopify.config.mjs",
-    extensionEntries: {},
+    entries: {},
     gitignore: {
       path: ".gitignore",
     },
@@ -107,7 +94,9 @@ function normalizeManifest(value: unknown): InitManifest {
 
   return {
     configFile: typeof value.configFile === "string" ? value.configFile : "bshopify.config.mjs",
-    extensionEntries: normalizeExtensionEntries(value.extensionEntries),
+    entries: normalizeManagedEntries(
+      isRecord(value.entries) ? value.entries : value.extensionEntries,
+    ),
     gitignore: normalizeGitignore(value.gitignore),
     packageScripts: normalizeStringRecord(value.packageScripts),
     preCommitHook: normalizePathRecord(value.preCommitHook),
@@ -115,12 +104,12 @@ function normalizeManifest(value: unknown): InitManifest {
   };
 }
 
-function normalizeExtensionEntries(value: unknown): Record<string, InitManifestExtensionEntry> {
+function normalizeManagedEntries(value: unknown): Record<string, InitManifestEntry> {
   if (!isRecord(value)) {
     return {};
   }
 
-  const entries: Record<string, InitManifestExtensionEntry> = {};
+  const entries: Record<string, InitManifestEntry> = {};
   for (const [name, entry] of Object.entries(value)) {
     if (!isRecord(entry) || typeof entry.path !== "string") {
       continue;

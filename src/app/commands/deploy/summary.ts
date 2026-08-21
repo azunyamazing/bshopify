@@ -1,9 +1,10 @@
 import { ansi, colorize } from "#/utils/output";
-import type { ExtensionEntry, RunnerContextBase } from "#/app/runner/types";
+import type { RunnerContextBase } from "#/app/runner/types";
+import type { ManagedEntry } from "#/extension/types";
 
 export function formatDeploySummary(
   context: RunnerContextBase,
-  entries: ExtensionEntry[],
+  entries: ManagedEntry[],
   dryRun: boolean,
 ): string {
   return [

@@ -4,14 +4,14 @@ import { bshopifyStateDir } from "#/app/runner/constants";
 import { formatShopifyCliConfigArgs, loadRunnerConfig } from "#/app/runner/config";
 import { createRunnerContext } from "#/app/runner/context";
 import {
-  findExtensionEntries,
-  loadExtensionHooks,
+  findManagedEntries,
+  loadManagedEntryHooks,
   preparePlans,
   runAfterDeployHooks,
   runBeforeDeployHooks,
   runOnErrorHooks,
   validatePlans,
-} from "#/app/runner/entries";
+} from "#/extension/entries";
 import {
   applyInjections,
   assertNoUnresolvedPlaceholders,
@@ -61,8 +61,11 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
       );
     }
 
-    const entries = await findExtensionEntries(cwd, config);
-    const hooks = await loadExtensionHooks(entries);
+    const entries = await findManagedEntries(cwd, {
+      entryFileName: config.entryFileName,
+      extensionsRoot: config.extensionsRoot,
+    });
+    const hooks = await loadManagedEntryHooks(entries);
     const plans = await preparePlans(context, hooks);
     await validatePlans(context, plans);
 

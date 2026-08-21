@@ -1,5 +1,9 @@
 import { isAbsolute, join, relative, sep } from "node:path";
 
+export function normalizePathPart(value: string): string {
+  return value.trim().replace(/^\/+|\/+$/g, "");
+}
+
 export function toPosixPath(path: string): string {
   return path.split(sep).join("/");
 }

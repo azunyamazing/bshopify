@@ -1,19 +1,25 @@
 import { register } from "node:module";
 import { pathToFileURL } from "node:url";
 
-interface ExtensionEntryModule {
+interface ManagedEntryModule {
   default: unknown;
 }
 
 const bshopifyEntryLoaderParam = "bshopify-entry-loader";
 let bshopifyEntryLoaderRegistered = false;
 
-export async function loadExtensionEntryModule(
+/**
+ * Loads a bshopify-managed entry module (`__entry.js`) as ESM, bypassing the
+ * default "type": "module" / extension-based module resolution so entry files
+ * can rely on project-relative CommonJS helpers without Node typeless
+ * package warnings.
+ */
+export async function loadManagedEntryModule(
   entryPath: string,
-): Promise<ExtensionEntryModule> {
+): Promise<ManagedEntryModule> {
   ensureBshopifyEntryLoader();
 
-  return import(formatEntryImportUrl(entryPath)) as Promise<ExtensionEntryModule>;
+  return import(formatEntryImportUrl(entryPath)) as Promise<ManagedEntryModule>;
 }
 
 function ensureBshopifyEntryLoader(): void {

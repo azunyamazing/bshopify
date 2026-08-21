@@ -1,14 +1,12 @@
-import { constants } from "node:fs";
-import { access, mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { isNodeError } from "#/utils/node";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { writeFileIfMissing } from "#/utils/files";
 import { readPackageJson } from "#/utils/package-json";
 import {
   configFileName,
   recommendedScripts,
   runnerConfigTemplate,
 } from "./constants";
-import { resolveProjectPath, toDisplayPath } from "./paths";
 import { mergeRunnerConfig } from "./runner-config-merge";
 import type { InitResult } from "./types";
 
@@ -58,31 +56,6 @@ export async function updatePackageScripts(
   packageJson.scripts = scripts;
   await writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
   result.updated.push(...changes);
-}
-
-export async function writeFileIfMissing(
-  cwd: string,
-  path: string,
-  content: string,
-  result: InitResult,
-): Promise<boolean> {
-  const absolutePath = resolveProjectPath(cwd, path);
-  const displayPath = toDisplayPath(cwd, absolutePath);
-
-  try {
-    await access(absolutePath, constants.F_OK);
-    result.skipped.push(displayPath);
-    return false;
-  } catch (error) {
-    if (!isNodeError(error) || error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  await mkdir(dirname(absolutePath), { recursive: true });
-  await writeFile(absolutePath, content);
-  result.created.push(displayPath);
-  return true;
 }
 
 function formatScriptChange(

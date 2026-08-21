@@ -1,3 +1,5 @@
+import type { ExtensionEnv } from "#/extension/types";
+
 export type ShopifyCommandRunner = (args: string[]) => Promise<number | void>;
 
 export interface DevOptions {
@@ -17,11 +19,24 @@ export interface DeployOptions {
   yes?: boolean;
 }
 
+/**
+ * bshopify runner configuration loaded from `bshopify.config.mjs`.
+ *
+ * Only `configFiles` and `failOnUnresolvedPlaceholders` are meant to be
+ * configured by the team. `extensionsRoot`, `entryFileName`, and
+ * `restoreMarkers` are internal defaults: new projects do not expose them,
+ * but existing configs may still override them for backward compatibility.
+ */
 export interface RunnerConfig {
+  /** App: Shopify app config files by environment. */
   configFiles: ConfigFileMap;
+  /** Internal default: bshopify-managed entry file name. */
   entryFileName: string;
+  /** Internal default: directory that contains Shopify extension folders. */
   extensionsRoot: string;
+  /** Extension: fail when an injection plan leaves template placeholders unresolved. */
   failOnUnresolvedPlaceholders: boolean;
+  /** Internal default: add file-type-aware restore comments during dev. */
   restoreMarkers: boolean;
 }
 
@@ -64,80 +79,6 @@ export interface ShopifyContext {
   clientId?: string;
   configFile: string;
   importantConfig: ShopifyImportantConfigItem[];
-}
-
-export interface ExtensionEnv {
-  APP_ENV: string;
-  SHOPIFY_APP_PROXY_BASE?: string;
-  SHOPIFY_APP_PROXY_PREFIX?: string;
-  SHOPIFY_APP_PROXY_SUBPATH?: string;
-  SHOPIFY_APP_PROXY_TARGET_URL?: string;
-  SHOPIFY_CONFIG_NAME: string;
-}
-
-export interface ExtensionInfo {
-  name: string;
-  root: string;
-}
-
-export interface ExtensionContext {
-  appProxy?: AppProxyContext;
-  command: RunnerCommand;
-  configName: string;
-  env: string;
-  extension: ExtensionInfo;
-  extensionEnv: ExtensionEnv;
-  runtimeConfig: RuntimeConfig;
-  shopify: ShopifyContext;
-}
-
-export interface InjectionPlan {
-  file: string;
-  pattern: string;
-  strategy: "replace";
-  value: unknown;
-}
-
-export interface ExtensionPlanResult {
-  extension?: string;
-  injections: InjectionPlan[];
-}
-
-export interface ExtensionLifecycle {
-  prepare(ctx: ExtensionContext): ExtensionPlanResult | Promise<ExtensionPlanResult>;
-  afterDeploy?(
-    ctx: ExtensionContext,
-    result: ExtensionDeployResult,
-  ): void | Promise<void>;
-  beforeDeploy?(
-    ctx: ExtensionContext,
-    plan: PreparedExtensionPlan,
-    plans: PreparedExtensionPlan[],
-  ): void | Promise<void>;
-  onError?(ctx: ExtensionContext, error: unknown): void | Promise<void>;
-  validate?(
-    ctx: ExtensionContext,
-    plan: PreparedExtensionPlan,
-    plans: PreparedExtensionPlan[],
-  ): void | Promise<void>;
-}
-
-export interface ExtensionDeployResult {
-  deployed: boolean;
-  dryRun: boolean;
-  exitCode: number;
-}
-
-export interface ExtensionEntry {
-  extension: ExtensionInfo;
-  filePath: string;
-}
-
-export interface PreparedExtensionPlan {
-  entry: ExtensionEntry;
-  extension: string;
-  hooks: ExtensionLifecycle;
-  injections: InjectionPlan[];
 }
 
 export interface RunnerContextBase {
