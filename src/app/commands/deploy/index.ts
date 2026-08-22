@@ -16,6 +16,7 @@ import {
   applyInjections,
   assertNoUnresolvedPlaceholders,
   formatAppliedInjections,
+  formatInjectionWarnings,
 } from "#/app/runner/injections";
 import { acquireLock } from "#/app/runner/lock";
 import { runShopifyCommand as runDefaultShopifyCommand } from "#/app/runner/shopify";
@@ -29,7 +30,7 @@ import {
   resolveConfigName,
 } from "./config";
 import { formatDeploySummary, formatRestoreNotice } from "./summary";
-import type { AppliedInjection } from "#/app/runner/injections";
+import type { AppliedInjection, InjectionWarning } from "#/app/runner/injections";
 import type {
   DeployOptions,
   ShopifyCommandRunner,
@@ -90,15 +91,22 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
 
     const transaction = await createFileTransaction(transactionPath);
     const appliedInjections: AppliedInjection[] = [];
+    const injectionWarnings: InjectionWarning[] = [];
 
     try {
       for (const plan of plans) {
-        appliedInjections.push(
-          ...(await applyInjections(cwd, plan, transaction, {
-            mode: dryRun ? "dryRun" : "deploy",
-            restoreMarkers: false,
-          })),
-        );
+        const result = await applyInjections(cwd, plan, transaction, {
+          mode: dryRun ? "dryRun" : "deploy",
+          restoreMarkers: false,
+        });
+        appliedInjections.push(...result.applied);
+        injectionWarnings.push(...result.warnings);
+      }
+
+      const warningSummary = formatInjectionWarnings(injectionWarnings, { cwd });
+
+      if (warningSummary !== undefined) {
+        console.warn(warningSummary);
       }
 
       const injectionSummary = formatAppliedInjections(appliedInjections, {

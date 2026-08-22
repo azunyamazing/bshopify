@@ -373,8 +373,7 @@ describe("bshopify CLI", () => {
       .filter((file) => deepRelativeImportPattern.test(file.content))
       .map((file) => file.path);
 
-    expect(tsconfig.compilerOptions?.baseUrl).toBe(".");
-    expect(tsconfig.compilerOptions?.paths?.["#/*"]).toEqual(["src/*"]);
+    expect(tsconfig.compilerOptions?.paths?.["#/*"]).toEqual(["./src/*"]);
     expect(vitestConfig).toContain('find: "#"');
     expect(offenders).toEqual([]);
   });
@@ -1207,6 +1206,125 @@ describe("devProject", () => {
     );
   });
 
+  it("warns and keeps dev running when an injection pattern matches nothing", async () => {
+    const cwd = await createDevProject();
+    const extensionRoot = join(cwd, "extensions", "theme-extension");
+    const unmatchedPath = join(extensionRoot, "assets", "productBlock.tsx");
+    await mkdir(join(extensionRoot, "assets"), { recursive: true });
+    await writeFile(
+      unmatchedPath,
+      'export function ProductBlock() { return <div data-api-base="https://example.test/proxy"></div>; }\n',
+    );
+    await writeFile(
+      join(extensionRoot, "__entry.js"),
+      [
+        "export default {",
+        "  async prepare(ctx) {",
+        "    return {",
+        "      injections: [",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
+        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "        },",
+        "        {",
+        '          file: "assets/productBlock.tsx",',
+        '          strategy: "replace",',
+        '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
+        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "        },",
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => 0);
+    let warningOutput = "";
+
+    try {
+      await devProject({ cwd, runShopifyCommand });
+      warningOutput = warn.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "dev"]);
+    await expect(readFile(unmatchedPath, "utf8")).resolves.toBe(
+      'export function ProductBlock() { return <div data-api-base="https://example.test/proxy"></div>; }\n',
+    );
+    expect(warningOutput).toContain("\u001B[1m\u001B[33mExtension injection warnings\u001B[39m\u001B[22m");
+    expect(warningOutput).toContain(
+      'extensions/theme-extension/assets/productBlock.tsx: expected exactly one "__SHOPIFY_APP_PROXY_BASE__" match, got 0; skipped.',
+    );
+  });
+
+  it("warns and keeps dev running when an injection pattern matches multiple times", async () => {
+    const cwd = await createDevProject();
+    const extensionRoot = join(cwd, "extensions", "theme-extension");
+    const repeatedPath = join(extensionRoot, "assets", "app.js");
+    await mkdir(join(extensionRoot, "assets"), { recursive: true });
+    await writeFile(
+      repeatedPath,
+      [
+        'const a = "__SHOPIFY_APP_PROXY_BASE__";',
+        'const b = "__SHOPIFY_APP_PROXY_BASE__";',
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(extensionRoot, "__entry.js"),
+      [
+        "export default {",
+        "  async prepare(ctx) {",
+        "    return {",
+        "      injections: [",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
+        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "        },",
+        "        {",
+        '          file: "assets/app.js",',
+        '          strategy: "replace",',
+        '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
+        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "        },",
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => 0);
+    let warningOutput = "";
+
+    try {
+      await devProject({ cwd, runShopifyCommand });
+      warningOutput = warn.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "dev"]);
+    await expect(readFile(repeatedPath, "utf8")).resolves.toBe(
+      [
+        'const a = "__SHOPIFY_APP_PROXY_BASE__";',
+        'const b = "__SHOPIFY_APP_PROXY_BASE__";',
+        "",
+      ].join("\n"),
+    );
+    expect(warningOutput).toContain(
+      'extensions/theme-extension/assets/app.js: expected exactly one "__SHOPIFY_APP_PROXY_BASE__" match, got 2; skipped.',
+    );
+  });
+
   it("fails before Shopify dev when Liquid placeholders remain unresolved", async () => {
     const cwd = await createDevProject();
     const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
@@ -1777,6 +1895,74 @@ describe("deployProject", () => {
       }),
     ).rejects.toThrow("__SHOPIFY_APP_PROXY_BASE__ has no value for deploy.");
     expect(runShopifyCommand).not.toHaveBeenCalled();
+  });
+
+  it("warns and keeps deploy running when an injection pattern matches nothing", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "shopify.app.test.toml"),
+      [
+        ...createShopifyBasicConfig("https://test.example.com"),
+        "",
+      ].join("\n"),
+    );
+    const extensionRoot = join(cwd, "extensions", "theme-extension");
+    const unmatchedPath = join(extensionRoot, "assets", "productBlock.tsx");
+    await mkdir(join(extensionRoot, "assets"), { recursive: true });
+    await writeFile(
+      unmatchedPath,
+      'export function ProductBlock() { return <div data-api-base="https://test.example.com"></div>; }\n',
+    );
+    await writeFile(
+      join(extensionRoot, "__entry.js"),
+      [
+        "export default {",
+        "  async prepare() {",
+        "    return {",
+        "      injections: [",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
+        '          value: "https://test.example.com/proxy",',
+        "        },",
+        "        {",
+        '          file: "assets/productBlock.tsx",',
+        '          strategy: "replace",',
+        '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
+        '          value: "https://test.example.com/proxy",',
+        "        },",
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => 0);
+    let warningOutput = "";
+
+    try {
+      const exitCode = await deployProject({
+        configName: "test",
+        cwd,
+        runShopifyCommand,
+        yes: true,
+      });
+      expect(exitCode).toBe(0);
+      warningOutput = warn.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "deploy", "--config", "test"]);
+    await expect(readFile(unmatchedPath, "utf8")).resolves.toBe(
+      'export function ProductBlock() { return <div data-api-base="https://test.example.com"></div>; }\n',
+    );
+    expect(warningOutput).toContain(
+      'extensions/theme-extension/assets/productBlock.tsx: expected exactly one "__SHOPIFY_APP_PROXY_BASE__" match, got 0; skipped.',
+    );
   });
 });
 

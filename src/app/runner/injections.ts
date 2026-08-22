@@ -21,10 +21,25 @@ export interface AppliedInjection {
   value: string;
 }
 
+export interface InjectionWarning {
+  path: string;
+  pattern: string;
+  matchCount: number;
+}
+
+export interface ApplyInjectionsResult {
+  applied: AppliedInjection[];
+  warnings: InjectionWarning[];
+}
+
 export interface FormatAppliedInjectionsOptions {
   configName?: string;
   cwd: string;
   mode?: "deploy" | "dev" | "dryRun";
+}
+
+export interface FormatInjectionWarningsOptions {
+  cwd: string;
 }
 
 interface AppliedInjectionGroup {
@@ -37,8 +52,9 @@ export async function applyInjections(
   plan: PreparedExtensionPlan,
   transaction: FileTransaction,
   options: ApplyInjectionsOptions,
-): Promise<AppliedInjection[]> {
+): Promise<ApplyInjectionsResult> {
   const applied: AppliedInjection[] = [];
+  const warnings: InjectionWarning[] = [];
   const mode = options.mode ?? "dev";
 
   for (const injection of plan.injections) {
@@ -62,9 +78,8 @@ export async function applyInjections(
     const matchCount = source.split(pattern).length - 1;
 
     if (matchCount !== 1) {
-      throw new Error(
-        `${formatPath(cwd, targetPath)} expected exactly one "${pattern}" match, got ${matchCount}.`,
-      );
+      warnings.push({ path: targetPath, pattern, matchCount });
+      continue;
     }
 
     const marker = options.restoreMarkers
@@ -83,7 +98,7 @@ export async function applyInjections(
     });
   }
 
-  return applied;
+  return { applied, warnings };
 }
 
 function formatInjectionErrorMode(mode: "deploy" | "dev" | "dryRun"): string {
@@ -119,6 +134,25 @@ export function formatAppliedInjections(
           )}`,
       ),
     ]),
+    "",
+  ].join("\n");
+}
+
+export function formatInjectionWarnings(
+  warnings: InjectionWarning[],
+  options: FormatInjectionWarningsOptions,
+): string | undefined {
+  if (warnings.length === 0) {
+    return undefined;
+  }
+
+  return [
+    "",
+    colorize(colorize("Extension injection warnings", ansi.yellow), ansi.bold),
+    ...warnings.map(
+      (warning) =>
+        `  ${formatPath(options.cwd, warning.path)}: expected exactly one "${warning.pattern}" match, got ${warning.matchCount}; skipped.`,
+    ),
     "",
   ].join("\n");
 }

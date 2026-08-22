@@ -12,6 +12,7 @@ import {
   applyInjections,
   assertNoUnresolvedPlaceholders,
   formatAppliedInjections,
+  formatInjectionWarnings,
 } from "#/app/runner/injections";
 import { acquireLock } from "#/app/runner/lock";
 import { runShopifyCommand as runDefaultShopifyCommand } from "#/app/runner/shopify";
@@ -20,7 +21,7 @@ import {
   restoreFileTransactionJournal,
 } from "#/app/runner/transaction";
 import { ansi, colorize } from "#/utils/output";
-import type { AppliedInjection } from "#/app/runner/injections";
+import type { AppliedInjection, InjectionWarning } from "#/app/runner/injections";
 import type { DevOptions } from "#/app/runner/types";
 
 export async function devProject(options: DevOptions = {}): Promise<number> {
@@ -58,15 +59,22 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
 
     const transaction = await createFileTransaction(transactionPath);
     const appliedInjections: AppliedInjection[] = [];
+    const injectionWarnings: InjectionWarning[] = [];
 
     try {
       for (const plan of plans) {
-        appliedInjections.push(
-          ...(await applyInjections(cwd, plan, transaction, {
-            mode: "dev",
-            restoreMarkers: config.restoreMarkers,
-          })),
-        );
+        const result = await applyInjections(cwd, plan, transaction, {
+          mode: "dev",
+          restoreMarkers: config.restoreMarkers,
+        });
+        appliedInjections.push(...result.applied);
+        injectionWarnings.push(...result.warnings);
+      }
+
+      const warningSummary = formatInjectionWarnings(injectionWarnings, { cwd });
+
+      if (warningSummary !== undefined) {
+        console.warn(warningSummary);
       }
 
       const injectionSummary = formatAppliedInjections(appliedInjections, {
