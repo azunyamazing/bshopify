@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { resolveExtensionPath } from "#/extension/paths";
 import type { PreparedExtensionPlan } from "#/extension/types";
 import { findFilesByExtension } from "#/utils/files";
-import { createFileMarker, createRestoreMarker } from "#/utils/markers";
 import { formatPath } from "#/utils/paths";
 import { ansi, colorize } from "#/utils/output";
+import { composeInjection } from "./compose-injection";
 import type { FileTransaction } from "./types";
 
 const unresolvedPlaceholderPattern = /__[A-Z0-9_]+__/g;
@@ -82,12 +82,10 @@ export async function applyInjections(
       continue;
     }
 
-    const marker = options.restoreMarkers
-      ? createFileMarker(targetPath, createRestoreMarker(pattern, value))
-      : undefined;
+    const composed = composeInjection(source, targetPath, pattern, value, options.restoreMarkers);
 
-    await transaction.writeFile(targetPath, source.replace(pattern, `${value}${marker ?? ""}`), {
-      marker,
+    await transaction.writeFile(targetPath, composed.content, {
+      marker: composed.marker,
       pattern,
       value,
     });

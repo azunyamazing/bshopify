@@ -6,30 +6,35 @@ import { extname } from "node:path";
  *
  * The marker embeds everything a restore needs without external state:
  * the placeholder pattern (base64url-encoded so it can never break the
- * surrounding comment syntax) and the length of the injected value that
- * immediately precedes the marker. Git clean filters and crash recovery
- * both rely on this self-describing form.
+ * surrounding comment syntax), the length of the injected value, the length
+ * of any gap between the value and the marker (when the marker had to be
+ * moved outside a string literal), and a checksum. Git clean filters and
+ * crash recovery both rely on this self-describing form.
  */
 export const restoreMarkerPrefix = "bshopify-restore";
 
 /**
  * Creates the self-describing restore marker core for an injection.
  *
- * Injected files contain `value` immediately followed by the marker comment,
- * so the marker records enough to reverse the replacement from the file
- * content alone:
- * `bshopify-restore:<b64url(pattern)>:<valueLength>:<checksum>:<nonce>`.
+ * Injected files contain the injected `value` followed by the marker comment
+ * (with an optional `gap` of untouched source text in between, when the
+ * placeholder sat inside a string literal and the comment had to be moved
+ * outside it), so the marker records enough to reverse the replacement from
+ * the file content alone:
+ * `bshopify-restore:<b64url(pattern)>:<valueLength>:<gapLength>:<checksum>:<nonce>`.
  * The checksum is over the injected value: restore only trusts the recorded
  * value length when the preceding text actually hashes to it, so marker-like
  * text in user content and hand-edited values are never "restored" into
- * garbage.
+ * garbage. Markers written before `gapLength` existed (4-field core) are
+ * still parsed by the restorers with an implicit gap of zero.
  */
 export function createRestoreMarker(
   pattern: string,
   value: string,
+  gap: string = "",
   nonce: string = randomUUID(),
 ): string {
-  return `${restoreMarkerPrefix}:${encodeBase64Url(pattern)}:${value.length}:${createValueChecksum(value)}:${nonce}`;
+  return `${restoreMarkerPrefix}:${encodeBase64Url(pattern)}:${value.length}:${gap.length}:${createValueChecksum(value)}:${nonce}`;
 }
 
 export function encodeBase64Url(value: string): string {

@@ -7,11 +7,13 @@ import {
   hasRestoreMarkers,
   restoreInjectedMarkers,
 } from "../src/app/runner/restore-markers";
+import { composeInjection } from "../src/app/runner/compose-injection";
 import {
   createFileMarker,
   createRestoreMarker,
   createValueChecksum,
   encodeBase64Url,
+  restoreMarkerPrefix,
 } from "../src/utils/markers";
 import {
   createFileTransaction,
@@ -25,12 +27,11 @@ afterEach(async () => {
 });
 
 /**
- * Mirrors how applyInjections composes the injected file content:
- * `source.replace(pattern, value + createFileMarker(path, createRestoreMarker(...)))`.
+ * Mirrors how applyInjections composes the injected file content
+ * (string-context-aware marker placement).
  */
 function inject(source: string, filePath: string, pattern: string, value: string): string {
-  const marker = createFileMarker(filePath, createRestoreMarker(pattern, value));
-  return source.replace(pattern, `${value}${marker}`);
+  return composeInjection(source, filePath, pattern, value, true).content;
 }
 
 describe("createRestoreMarker", () => {
@@ -202,6 +203,108 @@ describe("restoreInjectedMarkers", () => {
     expect(markers[0]?.pattern).toBe("__A__");
     expect(markers[1]?.pattern).toBe("__B__");
     expect(markers[0]!.fullStart).toBeLessThan(markers[1]!.fullStart);
+  });
+});
+
+describe("string-context injections", () => {
+  it("keeps the marker outside the string and restores the placeholder", () => {
+    const filePath = "extensions/x/assets/app.js";
+    const source = 'value: "REPLACE_WITH_CATALOG_API_URL",\n';
+    const injected = inject(source, filePath, "REPLACE_WITH_CATALOG_API_URL", "Catalog API value");
+
+    // The comment must sit after the closing quote, never inside the string.
+    expect(injected).toContain('value: "Catalog API value"/* bshopify-restore:');
+    expect(injected).not.toMatch(/"Catalog API value\/\* bshopify-restore:/);
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("restores a placeholder in the middle of a string", () => {
+    const filePath = "extensions/x/__entry.js";
+    const source = 'const url = "https://example.com/__PATH__/x";\n';
+    const injected = inject(source, filePath, "__PATH__", "products");
+
+    expect(injected).toContain('const url = "https://example.com/products/x"/* bshopify-restore:');
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("restores multiple placeholders inside one string", () => {
+    const filePath = "extensions/x/__entry.js";
+    const source = 'value: "__A__ and __B__",\n';
+    const first = inject(source, filePath, "__A__", "aaa");
+    const injected = inject(first, filePath, "__B__", "bbb");
+
+    expect(injected).not.toMatch(/"aaa\/\*|bbb\/\*/);
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("restores a quoted placeholder inside a Liquid output unit", () => {
+    const filePath = "extensions/x/blocks/app-embed.liquid";
+    const source = '{{ "__SHOPIFY_APP_PROXY_BASE__" }}\n';
+    const injected = inject(
+      source,
+      filePath,
+      "__SHOPIFY_APP_PROXY_BASE__",
+      "https://proxy.example.com",
+    );
+
+    // The marker must sit after the whole {{ }} unit: comments are not
+    // allowed inside Liquid output tags.
+    expect(injected).toContain('{{ "https://proxy.example.com" }}{% comment %} bshopify-restore:');
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("restores an unquoted placeholder inside a Liquid output unit", () => {
+    const filePath = "extensions/x/blocks/app-embed.liquid";
+    const source = "{{ __SHOPIFY_APP_PROXY_BASE__ }}\n";
+    const injected = inject(
+      source,
+      filePath,
+      "__SHOPIFY_APP_PROXY_BASE__",
+      "https://proxy.example.com",
+    );
+
+    expect(injected).toContain("{{ https://proxy.example.com }}{% comment %} bshopify-restore:");
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("restores a placeholder inside an HTML attribute value", () => {
+    const filePath = "extensions/x/blocks/embed.html";
+    const source = '<a href="__APP_URL__">go</a>\n';
+    const injected = inject(source, filePath, "__APP_URL__", "https://example.com");
+
+    expect(injected).toContain('<a href="https://example.com"<!-- bshopify-restore:');
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("keeps markers inline in markup text content", () => {
+    const filePath = "extensions/x/blocks/embed.html";
+    const source = "<p>it's __URL__ fine</p>\n";
+    const injected = inject(source, filePath, "__URL__", "https://example.com");
+
+    // Text content is not a string literal: the marker stays inline (an
+    // HTML comment in text renders nothing).
+    expect(injected).toContain("https://example.com<!-- bshopify-restore:");
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("skips a string-context marker whose value was edited mid-dev", () => {
+    const filePath = "extensions/x/__entry.js";
+    const source = 'const url = "__APP_URL__";\n';
+    const injected = inject(source, filePath, "__APP_URL__", "https://example.com");
+    const edited = injected.replace("https://example.com", "https://edited.example.com");
+
+    expect(restoreInjectedMarkers(edited)).toBe(edited);
+  });
+
+  it("restores legacy markers written without a gap length", () => {
+    const filePath = "extensions/x/__entry.js";
+    const source = 'const url = "__APP_URL__";\n';
+    // Old marker core: bshopify-restore:<b64(pattern)>:<valueLength>:<checksum>:<nonce>
+    const legacyMarker =
+      `/* ${restoreMarkerPrefix}:${encodeBase64Url("__APP_URL__")}:19:${createValueChecksum("https://example.com")}:00000000-0000-0000-0000-000000000000 */`;
+    const legacy = source.replace("__APP_URL__", `https://example.com${legacyMarker}`);
+
+    expect(restoreInjectedMarkers(legacy)).toBe(source);
   });
 });
 

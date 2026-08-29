@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanFilterScript } from "../src/app/commands/init/constants";
 import { restoreInjectedMarkers } from "../src/app/runner/restore-markers";
+import { composeInjection } from "../src/app/runner/compose-injection";
 import { createFileMarker, createRestoreMarker } from "../src/utils/markers";
 
 const tempDirs: string[] = [];
@@ -47,9 +48,12 @@ function runCleanFilter(
   });
 }
 
+/**
+ * Mirrors how applyInjections composes the injected file content
+ * (string-context-aware marker placement).
+ */
 function inject(source: string, filePath: string, pattern: string, value: string): string {
-  const marker = createFileMarker(filePath, createRestoreMarker(pattern, value));
-  return source.replace(pattern, `${value}${marker}`);
+  return composeInjection(source, filePath, pattern, value, true).content;
 }
 
 async function writeCleanFilterScript(): Promise<string> {
@@ -80,6 +84,56 @@ describe("generated git clean filter script", () => {
     const filePath = "extensions/x/__entry.js";
     const source = 'const proxyBase = "__SHOPIFY_APP_PROXY_BASE__";\n';
     const injected = inject(source, filePath, "__SHOPIFY_APP_PROXY_BASE__", "https://proxy.example.com");
+
+    const result = await runCleanFilter(scriptPath, injected);
+
+    expect(result.stdout).toEqual(Buffer.from(source));
+  });
+
+  it("restores a string-context injection without corrupting the string value", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const filePath = "extensions/x/assets/app.js";
+    const source = 'value: "REPLACE_WITH_CATALOG_API_URL",\n';
+    const injected = inject(source, filePath, "REPLACE_WITH_CATALOG_API_URL", "Catalog API value");
+
+    // The marker must never sit inside the string literal.
+    expect(injected).toContain('value: "Catalog API value"/* bshopify-restore:');
+
+    const result = await runCleanFilter(scriptPath, injected);
+
+    expect(result.stdout).toEqual(Buffer.from(source));
+  });
+
+  it("restores multiple placeholders inside one string", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const filePath = "extensions/x/__entry.js";
+    const source = 'value: "__A__ and __B__",\n';
+    const first = inject(source, filePath, "__A__", "aaa");
+    const injected = inject(first, filePath, "__B__", "bbb");
+
+    const result = await runCleanFilter(scriptPath, injected);
+
+    expect(result.stdout).toEqual(Buffer.from(source));
+  });
+
+  it("restores a placeholder inside a Liquid output unit", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const filePath = "extensions/x/blocks/app-embed.liquid";
+    const source = '{{ "__SHOPIFY_APP_PROXY_BASE__" }}\n';
+    const injected = inject(source, filePath, "__SHOPIFY_APP_PROXY_BASE__", "https://proxy.example.com");
+
+    expect(injected).toContain('{{ "https://proxy.example.com" }}{% comment %} bshopify-restore:');
+
+    const result = await runCleanFilter(scriptPath, injected);
+
+    expect(result.stdout).toEqual(Buffer.from(source));
+  });
+
+  it("restores a placeholder inside an HTML attribute value", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const filePath = "extensions/x/blocks/embed.html";
+    const source = '<a href="__APP_URL__">go</a>\n';
+    const injected = inject(source, filePath, "__APP_URL__", "https://example.com");
 
     const result = await runCleanFilter(scriptPath, injected);
 
@@ -173,6 +227,39 @@ describe("generated script parity with the TS restore", () => {
     [
       "html injected",
       inject('<a href="__A__">x</a>\n', "extensions/x/b.html", "__A__", "https://example.com"),
+    ],
+    [
+      "string-context js object",
+      inject('value: "__A__",\n', "extensions/x/app.js", "__A__", "Catalog API value"),
+    ],
+    [
+      "string-context mid-string",
+      inject('const url = "https://x.com/__A__/y";\n', "extensions/x/app.js", "__A__", "products"),
+    ],
+    [
+      "multiple placeholders in one string",
+      inject(
+        inject('value: "__A__ and __B__",\n', "extensions/x/app.js", "__A__", "aaa"),
+        "extensions/x/app.js",
+        "__B__",
+        "bbb",
+      ),
+    ],
+    [
+      "liquid output unit",
+      inject('{{ "__A__" }}\n', filePath, "__A__", "https://example.com"),
+    ],
+    [
+      "liquid output unit unquoted",
+      inject("{{ __A__ }}\n", filePath, "__A__", "https://example.com"),
+    ],
+    [
+      "html attribute value",
+      inject('<a href="__A__" class="x">go</a>\n', "extensions/x/b.html", "__A__", "https://example.com"),
+    ],
+    [
+      "markup text content with apostrophes",
+      inject("<p>it's __A__ fine</p>\n", "extensions/x/b.html", "__A__", "https://example.com"),
     ],
     [
       "multi-marker",

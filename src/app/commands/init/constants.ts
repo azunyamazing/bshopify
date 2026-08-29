@@ -70,7 +70,15 @@ export const cleanFilterScript = String.raw`#!/usr/bin/env node
 "use strict";
 
 const markerBytes = Buffer.from("bshopify-restore:");
+// Current marker format embeds the gap length; the legacy patterns match
+// markers written before gapLength existed (restored with an implicit gap
+// of zero). Both formats are needed so files injected by older versions of
+// bshopify still restore.
 const markerPatterns = [
+  /\/\* bshopify-restore:([A-Za-z0-9_-]+):(\d+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \*\//g,
+  /<!-- bshopify-restore:([A-Za-z0-9_-]+):(\d+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) -->/g,
+  /\{\/\* bshopify-restore:([A-Za-z0-9_-]+):(\d+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \*\/\}/g,
+  /\{% comment %} bshopify-restore:([A-Za-z0-9_-]+):(\d+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \{% endcomment %\}/g,
   /\/\* bshopify-restore:([A-Za-z0-9_-]+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \*\//g,
   /<!-- bshopify-restore:([A-Za-z0-9_-]+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) -->/g,
   /\{\/\* bshopify-restore:([A-Za-z0-9_-]+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \*\/\}/g,
@@ -92,17 +100,21 @@ function createValueChecksum(value) {
 
 function findMarkers(content) {
   const markers = [];
+  const legacyFormats = [4, 5, 6, 7];
 
-  for (const pattern of markerPatterns) {
+  for (let patternIndex = 0; patternIndex < markerPatterns.length; patternIndex += 1) {
+    const pattern = markerPatterns[patternIndex];
+    const legacy = legacyFormats.includes(patternIndex);
     pattern.lastIndex = 0;
 
     for (const match of content.matchAll(pattern)) {
       const fullText = match[0];
       const fullStart = match.index;
       markers.push({
-        checksum: match[3],
+        checksum: legacy ? match[3] : match[4],
         fullEnd: fullStart + fullText.length,
         fullStart,
+        gapLength: legacy ? 0 : Number(match[3]),
         pattern: Buffer.from(match[1], "base64url").toString("utf8"),
         valueLength: Number(match[2]),
       });
@@ -136,30 +148,45 @@ function clean(content) {
     return content;
   }
 
+  // Markers are processed left-to-right; each marker's positions are shifted
+  // by the cumulative delta of the regions already restored to its left, so
+  // injections whose markers sit inside another marker's gap (multiple
+  // placeholders in one string literal) restore in the right order.
   let result = content;
-  let consumedFrom = content.length;
+  const consumed = [];
 
-  for (let index = markers.length - 1; index >= 0; index -= 1) {
-    const marker = markers[index];
+  for (const marker of markers) {
+    let deltaBefore = 0;
 
-    // Skip markers inside a region already replaced by a marker to their
-    // right (marker-like text inside an injected value).
-    if (marker.fullStart >= consumedFrom) {
-      continue;
+    for (const region of consumed) {
+      if (region.end <= marker.fullStart) {
+        deltaBefore += region.delta;
+      }
     }
 
-    const valueStart = marker.fullStart - marker.valueLength;
+    const fullStart = marker.fullStart + deltaBefore;
+    const fullEnd = marker.fullEnd + deltaBefore;
+    const valueStart = fullStart - marker.valueLength - marker.gapLength;
 
     if (valueStart < 0) {
       continue;
     }
 
-    if (createValueChecksum(content.slice(valueStart, marker.fullStart)) !== marker.checksum) {
+    const valueEnd = valueStart + marker.valueLength;
+
+    if (createValueChecksum(result.slice(valueStart, valueEnd)) !== marker.checksum) {
       continue;
     }
 
-    result = result.slice(0, valueStart) + marker.pattern + result.slice(marker.fullEnd);
-    consumedFrom = valueStart;
+    result =
+      result.slice(0, valueStart) +
+      marker.pattern +
+      result.slice(valueEnd, fullStart) +
+      result.slice(fullEnd);
+    consumed.push({
+      end: marker.fullEnd,
+      delta: marker.pattern.length - marker.valueLength - (marker.fullEnd - marker.fullStart),
+    });
   }
 
   return result;
