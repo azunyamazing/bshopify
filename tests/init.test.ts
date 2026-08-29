@@ -461,6 +461,36 @@ describe("initProject", () => {
     expect(result.updated).toContain("bshopify.config.mjs");
   });
 
+  it("replaces configFiles in an existing runner config when resolution changed the mapping", async () => {
+    const cwd = await createTempProject();
+    await rm(join(cwd, "shopify.app.test.toml"));
+    await rm(join(cwd, "shopify.app.production.toml"));
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        "  configFiles: {",
+        '    dev: "shopify.app.dev.toml",',
+        '    test: "shopify.app.test.toml",',
+        '    production: "shopify.app.production.toml",',
+        "  },",
+        '  customField: "kept",',
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await initProject({ cwd, update: true });
+    const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
+
+    expect(result.errors).toEqual([]);
+    expect(runnerConfig).toContain('dev: "shopify.app.dev.toml"');
+    expect(runnerConfig).toContain('test: "shopify.app.dev.toml"');
+    expect(runnerConfig).toContain('production: "shopify.app.dev.toml"');
+    expect(runnerConfig).toContain('customField: "kept"');
+    expect(result.updated).toContain("bshopify.config.mjs");
+  });
+
   it("merges missing runner config fields even when nested objects use the same names", async () => {
     const cwd = await createTempProject();
     await writeFile(
@@ -1064,6 +1094,140 @@ describe("initProject", () => {
       message: "no extension directories found",
     });
     expect(result.errors).toEqual([]);
+  });
+
+  it("generates a single default config when no config files exist and points all environments at it", async () => {
+    const cwd = await createTempProject();
+    await rm(join(cwd, "shopify.app.dev.toml"));
+    await rm(join(cwd, "shopify.app.test.toml"));
+    await rm(join(cwd, "shopify.app.production.toml"));
+    const generated: string[] = [];
+
+    const result = await initProject({
+      cwd,
+      runShopifyCommand: async (args) => {
+        generated.push(args.join(" "));
+        await writeFile(join(cwd, "shopify.app.toml"), "name = \"app\"\n");
+        return 0;
+      },
+    });
+
+    expect(generated).toEqual(["app config link"]);
+    expect(result.errors).toEqual([]);
+    expect(result.created).toContain("shopify.app.toml");
+    expect(result.created).not.toContain("shopify.app.dev.toml");
+    const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
+    expect(runnerConfig).toContain('dev: "shopify.app.toml"');
+    expect(runnerConfig).toContain('test: "shopify.app.toml"');
+    expect(runnerConfig).toContain('production: "shopify.app.toml"');
+    await expect(readFile(join(cwd, "shopify.app.toml"), "utf8")).resolves.toContain(
+      "name = \"app\"",
+    );
+  });
+
+  it("reuses an existing config file for all environments without generating", async () => {
+    const cwd = await createTempProject();
+    await rm(join(cwd, "shopify.app.test.toml"));
+    await rm(join(cwd, "shopify.app.production.toml"));
+    let called = false;
+
+    const result = await initProject({
+      cwd,
+      runShopifyCommand: async () => {
+        called = true;
+        return 0;
+      },
+    });
+
+    expect(called).toBe(false);
+    expect(result.errors).toEqual([]);
+    expect(result.created).not.toContain("shopify.app.dev.toml");
+    const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
+    expect(runnerConfig).toContain('dev: "shopify.app.dev.toml"');
+    expect(runnerConfig).toContain('test: "shopify.app.dev.toml"');
+    expect(runnerConfig).toContain('production: "shopify.app.dev.toml"');
+  });
+
+  it("reuses an existing root config file when configured files are missing", async () => {
+    const cwd = await createTempProject();
+    await rm(join(cwd, "shopify.app.dev.toml"));
+    await rm(join(cwd, "shopify.app.test.toml"));
+    await rm(join(cwd, "shopify.app.production.toml"));
+    await writeFile(join(cwd, "shopify.app.toml"), "name = \"app\"\n");
+    let called = false;
+
+    const result = await initProject({
+      cwd,
+      runShopifyCommand: async () => {
+        called = true;
+        return 0;
+      },
+    });
+
+    expect(called).toBe(false);
+    expect(result.errors).toEqual([]);
+    const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
+    expect(runnerConfig).toContain('dev: "shopify.app.toml"');
+    expect(runnerConfig).toContain('test: "shopify.app.toml"');
+    expect(runnerConfig).toContain('production: "shopify.app.toml"');
+  });
+
+  it("keeps missing config file errors when shopify generation fails", async () => {
+    const cwd = await createTempProject();
+    await rm(join(cwd, "shopify.app.dev.toml"));
+    await rm(join(cwd, "shopify.app.test.toml"));
+    await rm(join(cwd, "shopify.app.production.toml"));
+
+    const result = await initProject({
+      cwd,
+      runShopifyCommand: async () => {
+        throw new Error("shopify CLI is not available");
+      },
+    });
+
+    expect(result.errors).toContain("missing shopify.app.dev.toml");
+    expect(result.errors).toContain("missing shopify.app.test.toml");
+    expect(result.errors).toContain("missing shopify.app.production.toml");
+    expect(result.warnings).toContain(
+      "failed to generate shopify.app.toml: shopify CLI is not available",
+    );
+  });
+
+  it("records a warning when shopify config link does not create the file", async () => {
+    const cwd = await createTempProject();
+    await rm(join(cwd, "shopify.app.dev.toml"));
+    await rm(join(cwd, "shopify.app.test.toml"));
+    await rm(join(cwd, "shopify.app.production.toml"));
+
+    const result = await initProject({
+      cwd,
+      runShopifyCommand: async () => 0,
+    });
+
+    expect(result.errors).toContain("missing shopify.app.dev.toml");
+    expect(result.errors).toContain("missing shopify.app.test.toml");
+    expect(result.errors).toContain("missing shopify.app.production.toml");
+    expect(result.warnings).toContain(
+      "shopify app config link did not create shopify.app.toml",
+    );
+  });
+
+  it("does not run shopify generation during check", async () => {
+    const cwd = await createTempProject();
+    await rm(join(cwd, "shopify.app.dev.toml"));
+    let called = false;
+
+    const result = await initProject({
+      cwd,
+      check: true,
+      runShopifyCommand: async () => {
+        called = true;
+        return 0;
+      },
+    });
+
+    expect(called).toBe(false);
+    expect(result.errors).toContain("missing shopify.app.dev.toml");
   });
 
   it("reports invalid config file paths during check instead of throwing", async () => {

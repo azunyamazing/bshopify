@@ -1,6 +1,9 @@
+import type { ShopifyCommandRunner } from "#/app/runner/types";
+
 export interface InitOptions {
   check?: boolean;
   cwd?: string;
+  runShopifyCommand?: ShopifyCommandRunner;
   update?: boolean;
 }
 

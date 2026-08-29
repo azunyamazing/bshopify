@@ -121,6 +121,8 @@ bshopify app init
 - Git local config `filter.bshopify.*`（clean / smudge / required=false）
 - `package.json` 中的 `dev`、`deploy` scripts，分别写为 `bshopify app dev` 和 `bshopify app deploy`；已有同名脚本会被替换，并在摘要中提示
 
+`configFiles` 指向的 Shopify app TOML 文件缺失时，`init` 不再直接停止。刚起步的项目没有分环境配置，因此**所有环境共享同一个配置文件**：如果项目里已存在任意 `shopify.app*.toml`（含配置中已存在的），直接复用该文件并让 `configFiles` 的各环境都指向它，不触发生成；如果项目里一个 TOML 都没有，则只调用一次 `shopify app config link` 生成默认 `shopify.app.toml`，并让 `configFiles` 的 dev / test / production 都指向它。生成成功会记入 created 摘要并继续后续流程，生成失败则仍按缺失文件报错。`--check` 只做只读检查，不会触发生成。
+
 Git clean filter：dev 运行期间扩展文件里的占位符被临时替换成真实值，此时执行 `git add` 会先经过 `git-add-cleaner.js` 把注入值还原成占位符再进暂存区，避免真实 URL/密钥被提交。filter 命令写在本地 `.git/config`（由 `init` 写入），脚本存放在被 ignore 的 `.bshopify/` 下——新 clone 必须跑过 `init` filter 才会生效，`init --update` 会按 CLI 最新模板直接替换脚本。无注入 marker 的文件（含二进制）原样透传；`required` 默认为 `false`，未配置 filter 的机器会静默按原样暂存。`init` 不会对已跟踪文件做任何改写：首次接入时 bshopify 尚未注入过任何值，用户自己的改动保持原样。
 
 Git hook 写入规则：如果当前项目配置了 `core.hooksPath`，会写入该目录；否则写入 Git 默认的 `.git/hooks/pre-commit`。如果 `pre-commit` 已存在，`init` 会在 shebang 后插入带标记的 `bshopify app guard` block，不会覆盖原有 hook 内容。hook 执行时会优先使用项目本地 `./node_modules/.bin/bshopify`，不存在时再回退到 PATH 中的 `bshopify`。

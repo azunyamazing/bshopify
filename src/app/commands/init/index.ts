@@ -1,4 +1,5 @@
 import { runProjectChecks } from "./checks";
+import { ensureShopifyConfigFiles } from "./config-files";
 import { bshopifyStateDir } from "#/app/runner/constants";
 import { loadRunnerConfig } from "#/app/runner/config";
 import {
@@ -47,8 +48,19 @@ export async function initProject(options: InitOptions = {}): Promise<InitResult
     return result;
   }
   const manifest = await loadInitManifest(cwd);
+
+  let configFiles = config.configFiles;
+  if (options.check !== true) {
+    configFiles = await ensureShopifyConfigFiles({
+      configFiles: config.configFiles,
+      cwd,
+      result,
+      runShopifyCommand: options.runShopifyCommand,
+    });
+  }
+
   await runProjectChecks(cwd, result, {
-    configFiles: Object.values(config.configFiles),
+    configFiles: [...new Set(Object.values(configFiles))],
     extensionsRoot: config.extensionsRoot,
   });
   await checkCleanFilter(cwd, result, config.extensionsRoot);
@@ -57,7 +69,7 @@ export async function initProject(options: InitOptions = {}): Promise<InitResult
     return result;
   }
 
-  await writeRunnerConfig(cwd, result);
+  await writeRunnerConfig(cwd, result, configFiles, config.configFiles);
   await ensureGitignoreEntry(cwd, result, bshopifyStateDir);
   const cleanFilterPath = await writeCleanFilterScript(cwd, result, options.update === true);
   recordCleanFilter(manifest, cleanFilterPath);

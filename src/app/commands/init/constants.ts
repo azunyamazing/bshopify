@@ -5,16 +5,20 @@ export const recommendedScripts: Record<string, string> = {
   deploy: "bshopify app deploy",
 };
 
-export const runnerConfigTemplate = `// bshopify runner config
+export function renderRunnerConfigTemplate(configFiles: Record<string, string>): string {
+  const entries = Object.entries(configFiles)
+    .filter(([, file]) => file.trim().length > 0)
+    .map(([env, file]) => `    ${env}: "${file}",`)
+    .join("\n");
+
+  return `// bshopify runner config
 // This file controls how bshopify selects Shopify app config files and how
 // extension injections behave during dev and deploy.
 
 export default {
   // --- App: Shopify app config files by environment ---
   configFiles: {
-    dev: "shopify.app.dev.toml",
-    test: "shopify.app.test.toml",
-    production: "shopify.app.production.toml",
+${entries}
   },
 
   // --- Extension: injection behavior ---
@@ -22,6 +26,7 @@ export default {
   failOnUnresolvedPlaceholders: true,
 };
 `;
+}
 export const legacyPreCommitGuardCommand = "bshopify guard";
 export const legacyPreCommitGuardEndMarker = "# bshopify guard end";
 export const legacyPreCommitGuardStartMarker = "# bshopify guard start";

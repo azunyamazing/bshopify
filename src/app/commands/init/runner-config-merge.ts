@@ -1,12 +1,18 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { configFileName } from "./constants";
+import { hasTopLevelConfigProperty, replaceTopLevelConfigProperty } from "./source-edit";
 import type { InitResult } from "./types";
 
-export async function mergeRunnerConfig(cwd: string, result: InitResult): Promise<void> {
+export async function mergeRunnerConfig(
+  cwd: string,
+  result: InitResult,
+  configFiles: Record<string, string>,
+  replaceConfigFiles = false,
+): Promise<void> {
   const configPath = join(cwd, configFileName);
   const current = await readFile(configPath, "utf8");
-  const next = reconcileRunnerConfigSource(current);
+  const next = reconcileRunnerConfigSource(current, configFiles, replaceConfigFiles);
 
   if (next === undefined) {
     result.warnings.push(`${configFileName} could not be merged automatically`);
@@ -21,7 +27,11 @@ export async function mergeRunnerConfig(cwd: string, result: InitResult): Promis
   result.updated.push(configFileName);
 }
 
-function reconcileRunnerConfigSource(source: string): string | undefined {
+function reconcileRunnerConfigSource(
+  source: string,
+  configFiles: Record<string, string>,
+  replaceConfigFiles: boolean,
+): string | undefined {
   const match = source.match(/export\s+default\s*\{([\s\S]*)\}\s*;?\s*$/);
 
   if (match === null || match.index === undefined) {
@@ -37,29 +47,36 @@ function reconcileRunnerConfigSource(source: string): string | undefined {
   const prefix = source.slice(0, bodyStart);
   const body = source.slice(bodyStart, bodyEnd);
   const suffix = source.slice(bodyEnd);
-  const nextBody = mergeRunnerConfigBody(body);
+  const nextBody = mergeRunnerConfigBody(body, configFiles, replaceConfigFiles);
 
   return `${prefix}${nextBody}${suffix.endsWith("\n") ? suffix : `${suffix}\n`}`;
 }
 
-function mergeRunnerConfigBody(body: string): string {
+function mergeRunnerConfigBody(
+  body: string,
+  configFiles: Record<string, string>,
+  replaceConfigFiles: boolean,
+): string {
   const cleaned = body.replace(/\s+$/, "");
   const additions = [
-    ["configFiles", [
-      "  configFiles: {",
-      '    dev: "shopify.app.dev.toml",',
-      '    test: "shopify.app.test.toml",',
-      '    production: "shopify.app.production.toml",',
-      "  },",
-    ].join("\n")],
+    ["configFiles", renderConfigFilesBlock(configFiles)],
     ["failOnUnresolvedPlaceholders", "  failOnUnresolvedPlaceholders: true,"],
   ] as const;
-  const nextParts = [cleaned];
+  const nextParts: string[] = [cleaned];
 
   for (const [propertyName, propertySource] of additions) {
-    if (!hasTopLevelConfigProperty(cleaned, propertyName)) {
-      nextParts.push(propertySource);
+    if (hasTopLevelConfigProperty(cleaned, propertyName)) {
+      if (propertyName === "configFiles" && replaceConfigFiles) {
+        nextParts[0] = replaceTopLevelConfigProperty(
+          nextParts[0] ?? cleaned,
+          propertyName,
+          propertySource,
+        );
+      }
+      continue;
     }
+
+    nextParts.push(propertySource);
   }
 
   const nextBody = nextParts
@@ -69,137 +86,11 @@ function mergeRunnerConfigBody(body: string): string {
   return `\n${nextBody}\n`;
 }
 
-function hasTopLevelConfigProperty(source: string, propertyName: string): boolean {
-  const propertyPattern = new RegExp(
-    `^\\s*(?:["']${escapeRegExp(propertyName)}["']|${escapeRegExp(propertyName)})\\s*:`,
-  );
-  let depth = 0;
-  let isInsideBlockComment = false;
+function renderConfigFilesBlock(configFiles: Record<string, string>): string {
+  const entries = Object.entries(configFiles)
+    .filter(([, file]) => file.trim().length > 0)
+    .map(([env, file]) => `    ${env}: "${file}",`)
+    .join("\n");
 
-  for (const line of source.split(/\r?\n/)) {
-    const lineWithoutComments = stripComments(line, isInsideBlockComment);
-    isInsideBlockComment = lineWithoutComments.isInsideBlockComment;
-
-    if (depth === 0 && propertyPattern.test(lineWithoutComments.source)) {
-      return true;
-    }
-
-    depth = Math.max(0, depth + countBraceDelta(lineWithoutComments.source));
-  }
-
-  return false;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function countBraceDelta(line: string): number {
-  let delta = 0;
-  let quote: '"' | "'" | "`" | undefined;
-  let escaped = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
-
-    if (quote !== undefined) {
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-
-      if (char === "\\") {
-        escaped = true;
-        continue;
-      }
-
-      if (char === quote) {
-        quote = undefined;
-      }
-
-      continue;
-    }
-
-    if (char === "/" && next === "/") {
-      break;
-    }
-
-    if (char === "\"" || char === "'" || char === "`") {
-      quote = char;
-      continue;
-    }
-
-    if (char === "{") {
-      delta += 1;
-    } else if (char === "}") {
-      delta -= 1;
-    }
-  }
-
-  return delta;
-}
-
-interface StripCommentsResult {
-  isInsideBlockComment: boolean;
-  source: string;
-}
-
-function stripComments(line: string, isInsideBlockComment: boolean): StripCommentsResult {
-  let source = "";
-  let quote: '"' | "'" | "`" | undefined;
-  let escaped = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
-
-    if (isInsideBlockComment) {
-      if (char === "*" && next === "/") {
-        isInsideBlockComment = false;
-        index += 1;
-      }
-      continue;
-    }
-
-    if (quote !== undefined) {
-      source += char;
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-
-      if (char === "\\") {
-        escaped = true;
-        continue;
-      }
-
-      if (char === quote) {
-        quote = undefined;
-      }
-
-      continue;
-    }
-
-    if (char === "/" && next === "/") {
-      break;
-    }
-
-    if (char === "/" && next === "*") {
-      isInsideBlockComment = true;
-      index += 1;
-      continue;
-    }
-
-    if (char === "\"" || char === "'" || char === "`") {
-      quote = char;
-    }
-
-    source += char;
-  }
-
-  return {
-    isInsideBlockComment,
-    source,
-  };
+  return `  configFiles: {\n${entries}\n  },`;
 }

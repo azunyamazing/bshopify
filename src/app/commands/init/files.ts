@@ -5,7 +5,7 @@ import { readPackageJson } from "#/utils/package-json";
 import {
   configFileName,
   recommendedScripts,
-  runnerConfigTemplate,
+  renderRunnerConfigTemplate,
 } from "./constants";
 import { mergeRunnerConfig } from "./runner-config-merge";
 import type { InitResult } from "./types";
@@ -13,12 +13,35 @@ import type { InitResult } from "./types";
 export async function writeRunnerConfig(
   cwd: string,
   result: InitResult,
+  configFiles: Record<string, string>,
+  previousConfigFiles: Record<string, string> = configFiles,
 ): Promise<void> {
-  const created = await writeFileIfMissing(cwd, configFileName, runnerConfigTemplate, result);
+  const created = await writeFileIfMissing(
+    cwd,
+    configFileName,
+    renderRunnerConfigTemplate(configFiles),
+    result,
+  );
 
   if (!created) {
-    await mergeRunnerConfig(cwd, result);
+    const replaceConfigFiles = !sameConfigFiles(configFiles, previousConfigFiles);
+    await mergeRunnerConfig(cwd, result, configFiles, replaceConfigFiles);
   }
+}
+
+function sameConfigFiles(
+  left: Record<string, string>,
+  right: Record<string, string>,
+): boolean {
+  const leftEntries = Object.entries(left).filter(([, file]) => file.trim().length > 0);
+  const rightEntries = Object.entries(right).filter(([, file]) => file.trim().length > 0);
+
+  return (
+    leftEntries.length === rightEntries.length
+    && leftEntries.every(
+      ([env, file]) => right[env] === file,
+    )
+  );
 }
 
 export async function updatePackageScripts(
