@@ -2,8 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { bshopifyStateDir } from "#/app/runner/constants";
 import { isNodeError } from "#/utils/node";
-import { isRecord, toStringRecord } from "#/utils/objects";
-import { recommendedScripts } from "./constants";
+import { isRecord } from "#/utils/objects";
 import { resolveProjectPath } from "./paths";
 
 export const manifestFileName = "bshopify.manifest.json";
@@ -13,7 +12,6 @@ export interface InitManifest {
   configFile: string;
   entries: Record<string, InitManifestEntry>;
   gitignore: InitManifestGitignore;
-  packageScripts: Record<string, string>;
   preCommitHook?: InitManifestPath;
   version: number;
 }
@@ -60,7 +58,6 @@ export function applyRunnerConfigToManifest(manifest: InitManifest): void {
   manifest.gitignore = {
     path: ".gitignore",
   };
-  manifest.packageScripts = { ...recommendedScripts };
 }
 
 export function recordPreCommitHook(manifest: InitManifest, path: string | undefined): void {
@@ -83,7 +80,6 @@ function createEmptyManifest(): InitManifest {
     gitignore: {
       path: ".gitignore",
     },
-    packageScripts: {},
     version: 1,
   };
 }
@@ -104,7 +100,6 @@ function normalizeManifest(value: unknown): InitManifest {
       isRecord(value.entries) ? value.entries : value.extensionEntries,
     ),
     gitignore: normalizeGitignore(value.gitignore),
-    packageScripts: normalizeStringRecord(value.packageScripts),
     preCommitHook: normalizePathRecord(value.preCommitHook),
     version: 1,
   };
@@ -148,8 +143,4 @@ function normalizePathRecord(value: unknown): InitManifestPath | undefined {
   }
 
   return { path: value.path };
-}
-
-function normalizeStringRecord(value: unknown): Record<string, string> {
-  return isRecord(value) ? toStringRecord(value) : {};
 }

@@ -14,7 +14,6 @@ export async function runProjectChecks(
   result: InitResult,
   options: ProjectCheckOptions,
 ): Promise<void> {
-  await checkPath(cwd, "package.json", "found package.json", result);
   await checkOptionalPath(
     cwd,
     options.extensionsRoot,

@@ -89,7 +89,7 @@ node dist/cli.js --help
 
 | 命令 | 目标用途 |
 |-|-|
-| `bshopify app init` | 初始化项目接入文件、配置、Git hook、推荐 scripts 和 Extension Entry |
+| `bshopify app init` | 初始化项目接入文件、配置、Git hook 和 Extension Entry |
 | `bshopify app dev` | 临时注入 Extension Entry 产物，按配置文件路径推导 Shopify config 名并执行 `shopify app dev --config <name>`，结束后恢复占位符 |
 | `bshopify app guard` | 阻止真实注入值或持锁状态进入提交 |
 
@@ -119,7 +119,8 @@ bshopify app init
 - `.bshopify/git-add-cleaner.js`（Git clean/smudge filter，位于被 ignore 的 `.bshopify/` 下，不随仓库提交）
 - `.gitattributes`（`extensions/** filter=bshopify`）
 - Git local config `filter.bshopify.*`（clean / smudge / required=false）
-- `package.json` 中的 `dev`、`deploy` scripts，分别写为 `bshopify app dev` 和 `bshopify app deploy`；已有同名脚本会被替换，并在摘要中提示
+
+`init` 不会改写 `package.json`：`dev`、`deploy` 等 scripts 由你自己决定，想用 bshopify 时在 `package.json` 里配 `"dev": "bshopify app dev"` 即可。
 
 `configFiles` 指向的 Shopify app TOML 文件缺失时，`init` 不再直接停止。刚起步的项目没有分环境配置，因此**所有环境共享同一个配置文件**：如果项目里已存在任意 `shopify.app*.toml`（含配置中已存在的），直接复用该文件并让 `configFiles` 的各环境都指向它，不触发生成；如果项目里一个 TOML 都没有，则只调用一次 `shopify app config link` 生成默认 `shopify.app.toml`，并让 `configFiles` 的 dev / test / production 都指向它。生成成功会记入 created 摘要并继续后续流程，生成失败则仍按缺失文件报错。`--check` 只做只读检查，不会触发生成。
 
@@ -141,7 +142,7 @@ bshopify app init --check
 bshopify app init --update
 ```
 
-`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录受管 entry 路径、推荐 scripts、Git hook 路径和 clean filter 脚本路径。`--update` 会读取当前 `bshopify.config.mjs` 和 manifest，先按旧坐标迁移或清理受管资源，再补齐缺失文件并写回 manifest。已有的 `bshopify.config.mjs` 不会被覆盖；entry 文件名属于内部默认（`__entry.js`），若旧配置改过它，`--update` 会按 manifest 记录的旧路径 rename 到新文件名；`package.json` scripts 在 update 时只补新增命令，不覆盖已有自定义命令；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`；clean filter 脚本在 update 时同步为最新模板。
+`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录受管 entry 路径、Git hook 路径和 clean filter 脚本路径。`--update` 会读取当前 `bshopify.config.mjs` 和 manifest，先按旧坐标迁移或清理受管资源，再补齐缺失文件并写回 manifest。已有的 `bshopify.config.mjs` 不会被覆盖；entry 文件名属于内部默认（`__entry.js`），若旧配置改过它，`--update` 会按 manifest 记录的旧路径 rename 到新文件名；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`；clean filter 脚本在 update 时同步为最新模板。`package.json` 不在受管范围内，scripts 由你自行维护。
 
 对指定目录执行初始化：
 

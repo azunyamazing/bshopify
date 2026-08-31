@@ -20,7 +20,7 @@
 | 能力 | 对应 Shopify CLI | 说明 |
 |-|-|-|
 | CLI 骨架 / 降级透传 | 全部命令 | ESM+TS+commander+tsup；未接管命令透传 `shopify`，bin 提供 `bshopify`/`bs` |
-| `app init` | `app init` 前置 | 生成 config、gitignore、pre-commit hook、`__entry.js`、scripts、manifest；`--check/--update/--cwd` |
+| `app init` | `app init` 前置 | 生成 config、gitignore、pre-commit hook、`__entry.js`、manifest；`--check/--update/--cwd` |
 | `app dev` | `app dev` | config 推导、entry 注入 + restore marker、锁、事务 journal、崩溃恢复 |
 | `app deploy` | `app deploy` | 注入、占位符校验、确认流程、`--dry-run`、before/after/onError 钩子 |
 | `app guard` | — | **仅命令占位（no-op）**，pre-commit hook 已写入但本体逻辑未实现 |
@@ -158,7 +158,7 @@
 
 ### 5.1 创建链路一体化
 
-- `bshopify create app <name>`：`shopify app init` + bshopify init 一键化，内置团队模板（org、URL、默认 configFiles、scripts）
+- `bshopify create app <name>`：`shopify app init` + bshopify init 一键化，内置团队模板（org、URL、默认 configFiles）
 - `bshopify init --template <t>`：接入模板化
 
 ### 5.2 运行期辅助（对齐 `shopify app logs / webhook trigger / open`）

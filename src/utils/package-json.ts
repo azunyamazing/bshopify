@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 
 declare const __BSHOPIFY_PACKAGE_NAME__: string | undefined;
@@ -11,7 +10,6 @@ export interface PackageInfo {
 
 export interface PackageJson {
   name?: unknown;
-  scripts?: Record<string, string>;
   version?: unknown;
   [key: string]: unknown;
 }
@@ -23,10 +21,6 @@ export interface PackageJsonRequire {
 const require = createRequire(import.meta.url);
 
 export const packageInfo: PackageInfo = readPackageInfo();
-
-export async function readPackageJson(path: string): Promise<PackageJson> {
-  return JSON.parse(await readFile(path, "utf8")) as PackageJson;
-}
 
 export function readPackageJsonWithRequire(
   requirePackage: PackageJsonRequire,

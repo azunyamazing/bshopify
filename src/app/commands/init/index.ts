@@ -8,10 +8,7 @@ import {
   ensureGitattributesEntry,
   writeCleanFilterScript,
 } from "./clean-filter";
-import {
-  updatePackageScripts,
-  writeRunnerConfig,
-} from "./files";
+import { writeRunnerConfig } from "./files";
 import { writeManagedEntries } from "#/extension/manage";
 import { ensureGitignoreEntry } from "./gitignore";
 import { writePreCommitHook } from "./git-hooks";
@@ -91,7 +88,6 @@ export async function initProject(options: InitOptions = {}): Promise<InitResult
     options.update === true,
     manifest,
   );
-  await updatePackageScripts(cwd, result, options.update === true);
   applyRunnerConfigToManifest(manifest);
   await saveInitManifest(cwd, manifest);
 

@@ -18,7 +18,6 @@ interface FixturePackageJson {
 interface FixtureInitManifest {
   cleanFilter?: { path: string };
   entries: Record<string, { contentHash?: string; path: string }>;
-  packageScripts: Record<string, string>;
   preCommitHook?: { path: string };
   version: number;
 }
@@ -88,7 +87,7 @@ afterEach(async () => {
 });
 
 describe("initProject", () => {
-  it("generates runner config, default git hook, gitignore entry, extension entry, and scripts", async () => {
+  it("generates runner config, default git hook, gitignore entry, and extension entry", async () => {
     const cwd = await createTempProject();
 
     const result = await initProject({ cwd });
@@ -115,11 +114,12 @@ describe("initProject", () => {
       readFile(join(cwd, "extensions", "theme-extension", "__entry.js"), "utf8"),
     ).resolves.toContain("async prepare(ctx)");
 
+    // init leaves package.json scripts to the user and never overrides them.
     const packageJson = JSON.parse(
       await readFile(join(cwd, "package.json"), "utf8"),
     ) as FixturePackageJson;
-    expect(packageJson.scripts.dev).toBe("bshopify app dev");
-    expect(packageJson.scripts.deploy).toBe("bshopify app deploy");
+    expect(packageJson.scripts.dev).toBe("shopify app dev");
+    expect(packageJson.scripts.deploy).toBeUndefined();
     expect(packageJson.scripts.lint).toBe("eslint .");
     expect(packageJson.scripts["shopify:dev"]).toBeUndefined();
     expect(packageJson.scripts["shopify:deploy"]).toBeUndefined();
@@ -127,10 +127,7 @@ describe("initProject", () => {
     expect(packageJson.scripts["shopify:guard"]).toBeUndefined();
     expect(result.errors).toEqual([]);
     expect(result.created).toContain("bshopify.config.mjs");
-    expect(result.updated).toContain(
-      'package.json scripts: replaced dev: "shopify app dev" -> "bshopify app dev"',
-    );
-    expect(result.updated).toContain("package.json scripts: added deploy");
+    expect(result.updated).not.toContain(expect.stringContaining("package.json scripts"));
   });
 
   it("writes an init manifest for generated and managed resources", async () => {
@@ -146,8 +143,7 @@ describe("initProject", () => {
     });
     expect(manifest.version).toBe(1);
     expect(manifest).not.toHaveProperty("tmpRoot");
-    expect(manifest.packageScripts.dev).toBe("bshopify app dev");
-    expect(manifest.packageScripts.deploy).toBe("bshopify app deploy");
+    expect(manifest).not.toHaveProperty("packageScripts");
     expect(manifest.preCommitHook?.path).toBe(".git/hooks/pre-commit");
     expect(manifest.entries["theme-extension"]?.path).toBe(
       "extensions/theme-extension/__entry.js",
@@ -169,7 +165,6 @@ describe("initProject", () => {
             },
           },
           gitignore: { path: ".gitignore" },
-          packageScripts: {},
           version: 1,
         },
         null,
@@ -330,7 +325,6 @@ describe("initProject", () => {
           configFile: "bshopify.config.mjs",
           entries: {},
           gitignore: { path: ".gitignore" },
-          packageScripts: {},
           preCommitHook: { path: ".git/hooks/pre-commit" },
           version: 1,
         },
@@ -538,7 +532,7 @@ describe("initProject", () => {
     expect(runnerConfig.match(/restoreMarkers:/g)).toHaveLength(1);
   });
 
-  it("adds missing package scripts on update without replacing custom scripts", async () => {
+  it("leaves package.json scripts untouched on update", async () => {
     const cwd = await createTempProject();
     await writeFile(
       join(cwd, "package.json"),
@@ -560,11 +554,9 @@ describe("initProject", () => {
     ) as FixturePackageJson;
 
     expect(packageJson.scripts.dev).toBe("pnpm custom-dev");
-    expect(packageJson.scripts.deploy).toBe("bshopify app deploy");
-    expect(result.updated).toContain("package.json scripts: added deploy");
-    expect(result.warnings).toContain(
-      'package.json scripts: kept custom dev: "pnpm custom-dev"',
-    );
+    expect(packageJson.scripts.deploy).toBeUndefined();
+    // init never reports package.json script changes in the update summary.
+    expect(result.updated).not.toContain(expect.stringContaining("package.json scripts"));
   });
 
   it("renames stale generated extension entries when the configured entry name changes", async () => {
@@ -813,7 +805,6 @@ describe("initProject", () => {
             },
           },
           gitignore: { path: ".gitignore" },
-          packageScripts: {},
           version: 1,
         },
         null,
@@ -1069,9 +1060,9 @@ describe("initProject", () => {
       code: "ENOENT",
     });
     expect(result.checks).toContainEqual({
-      name: "package.json",
+      name: "shopify.app.dev.toml",
       ok: true,
-      message: "found package.json",
+      message: "found shopify.app.dev.toml",
     });
     expect(result.errors).toEqual([]);
   });
@@ -1262,7 +1253,7 @@ describe("initProject", () => {
       created: ["bshopify.config.mjs"],
       errors: ["missing extensions"],
       skipped: ["extensions/theme-extension/__entry.js"],
-      updated: ["package.json scripts: added deploy"],
+      updated: [".git/hooks/pre-commit"],
       warnings: ["git repository not found; pre-commit hook skipped"],
     });
 
@@ -1271,7 +1262,7 @@ describe("initProject", () => {
     expect(summary).not.toContain("package.json: package.json");
     expect(summary).not.toContain("found package.json");
     expect(summary).toContain("\n\n\u001B[1m\u001B[36mUpdated\u001B[39m\u001B[22m");
-    expect(summary).toContain("  \u001B[36m~\u001B[39m package.json scripts: added deploy");
+    expect(summary).toContain("  \u001B[36m~\u001B[39m .git/hooks/pre-commit");
     expect(summary).toContain("  \u001B[33m!\u001B[39m git repository not found; pre-commit hook skipped");
     expect(summary).toContain("  \u001B[31mx\u001B[39m missing extensions");
   });
@@ -1307,7 +1298,7 @@ describe("initProject", () => {
       created: [],
       errors: [],
       mode: "update",
-      skipped: ["package.json scripts"],
+      skipped: [".gitattributes"],
       updated: [],
       warnings: [],
     });

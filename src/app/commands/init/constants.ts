@@ -1,10 +1,5 @@
 export const configFileName = "bshopify.config.mjs";
 
-export const recommendedScripts: Record<string, string> = {
-  dev: "bshopify app dev",
-  deploy: "bshopify app deploy",
-};
-
 export function renderRunnerConfigTemplate(configFiles: Record<string, string>): string {
   const entries = Object.entries(configFiles)
     .filter(([, file]) => file.trim().length > 0)
