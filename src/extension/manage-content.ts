@@ -10,13 +10,12 @@ import { readFile } from "node:fs/promises";
 export const managedEntryTemplate = `export default {
   async prepare(ctx) {
     return {
-      extension: ctx.extension.name,
       injections: [
         // {
         //   file: "blocks/app-embed.liquid",
         //   strategy: "replace",
-        //   pattern: "__SHOPIFY_APP_PROXY_BASE__",
-        //   value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,
+        //   pattern: "__APP_URL__",
+        //   value: ctx.appConfig.application_url,
         // },
       ],
     };

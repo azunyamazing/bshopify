@@ -4,7 +4,6 @@ import type { RunnerContextBase } from "#/app/runner/types";
 import { isNodeError } from "#/utils/node";
 import { isRecord, toRequiredString } from "#/utils/objects";
 import { toPosixPath } from "#/utils/paths";
-import { createExtensionContext } from "./context";
 import { loadManagedEntryModule } from "./entry-loader";
 import type {
   ExtensionDeployResult,
@@ -110,8 +109,7 @@ export async function preparePlans(
   const plans: PreparedExtensionPlan[] = [];
 
   for (const hook of hooks) {
-    const extensionContext = createExtensionContext(context, hook.entry);
-    const result = await hook.hooks.prepare(extensionContext);
+    const result = await hook.hooks.prepare(context);
 
     if (!isRecord(result) || !Array.isArray(result.injections)) {
       throw new Error(
@@ -134,7 +132,7 @@ export async function validatePlans(
   plans: PreparedExtensionPlan[],
 ): Promise<void> {
   for (const plan of plans) {
-    await plan.hooks.validate?.(createExtensionContext(context, plan.entry), plan, plans);
+    await plan.hooks.validate?.(context, plan, plans);
   }
 }
 
@@ -143,7 +141,7 @@ export async function runBeforeDeployHooks(
   plans: PreparedExtensionPlan[],
 ): Promise<void> {
   for (const plan of plans) {
-    await plan.hooks.beforeDeploy?.(createExtensionContext(context, plan.entry), plan, plans);
+    await plan.hooks.beforeDeploy?.(context, plan, plans);
   }
 }
 
@@ -153,7 +151,7 @@ export async function runAfterDeployHooks(
   result: ExtensionDeployResult,
 ): Promise<void> {
   for (const plan of plans) {
-    await plan.hooks.afterDeploy?.(createExtensionContext(context, plan.entry), result);
+    await plan.hooks.afterDeploy?.(context, result);
   }
 }
 
@@ -163,7 +161,7 @@ export async function runOnErrorHooks(
   error: unknown,
 ): Promise<void> {
   for (const plan of plans) {
-    await plan.hooks.onError?.(createExtensionContext(context, plan.entry), error);
+    await plan.hooks.onError?.(context, error);
   }
 }
 

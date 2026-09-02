@@ -1,8 +1,13 @@
 import { join } from "node:path";
 import { confirm } from "@inquirer/prompts";
 import { bshopifyStateDir } from "#/app/runner/constants";
-import { formatShopifyCliConfigArgs, loadRunnerConfig } from "#/app/runner/config";
+import {
+  formatShopifyCliConfigArgs,
+  getShopifyCliConfigName,
+  loadRunnerConfig,
+} from "#/app/runner/config";
 import { createRunnerContext } from "#/app/runner/context";
+import { printEnvFilesOutput } from "#/app/runner/env-files";
 import {
   findManagedEntries,
   loadManagedEntryHooks,
@@ -42,12 +47,12 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
   const configName = await resolveConfigName(options.configName, config);
   const dryRun = options.dryRun === true;
 
-  const context = await createRunnerContext({
-    command: dryRun ? "dryRun" : "deploy",
+  const { context, envFileSummary, envFileWarnings } = await createRunnerContext({
     configName,
     cwd,
     runnerConfig: config,
   });
+  printEnvFilesOutput(envFileSummary, envFileWarnings);
   assertShopifyDeployConfig(context);
   const lock = await acquireLock(cwd, bshopifyStateDir);
   const transactionPath = join(cwd, bshopifyStateDir, "extension-prepare.transaction.json");
@@ -81,7 +86,7 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
     if (!dryRun && options.yes !== true) {
       const shouldDeploy = await confirm({
         default: false,
-        message: `Deploy ${context.configName} with ${context.shopify.configFile}?`,
+        message: `Deploy ${context.env} with ${context.configPath}?`,
       });
 
       if (!shouldDeploy) {
@@ -110,7 +115,7 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
       }
 
       const injectionSummary = formatAppliedInjections(appliedInjections, {
-        configName: context.shopify.cliConfigName,
+        configName: getShopifyCliConfigName(context.configPath),
         cwd,
         mode: dryRun ? "dryRun" : "deploy",
       });
@@ -138,7 +143,7 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
           (await runShopifyCommand([
             "app",
             "deploy",
-            ...formatShopifyCliConfigArgs(context.shopify.cliConfigName),
+            ...formatShopifyCliConfigArgs(getShopifyCliConfigName(context.configPath)),
             ...(options.shopifyArgs ?? []),
           ])) ?? 0;
       }

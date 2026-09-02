@@ -16,6 +16,12 @@ export default {
 ${entries}
   },
 
+  // --- Extension: custom env injection (optional) ---
+  // Map a key to one or more root-relative JSON/TOML files; each key becomes
+  // its own field on the extension entry context (ctx.<key>), e.g.
+  // envFiles: { aEnv: ["config/a.json", "config/a.toml"] }.
+  envFiles: {},
+
   // --- Extension: injection behavior ---
   // Fail when an injection plan leaves template placeholders unresolved.
   failOnUnresolvedPlaceholders: true,

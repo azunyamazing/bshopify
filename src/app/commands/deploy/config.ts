@@ -1,4 +1,5 @@
 import { input, select } from "@inquirer/prompts";
+import { readRecordString } from "#/utils/objects";
 import type { RunnerConfig, RunnerContextBase } from "#/app/runner/types";
 
 export interface ProductionConfirmationOptions {
@@ -63,12 +64,12 @@ export async function requireProductionConfirmation(
 }
 
 export function assertShopifyDeployConfig(context: RunnerContextBase): void {
-  assertRequiredShopifyField(context.shopify.configFile, "client_id", context.shopify.clientId);
-  assertRequiredShopifyField(context.shopify.configFile, "name", context.shopify.appName);
+  assertRequiredShopifyField(context.configPath, "client_id", readRecordString(context.appConfig, "client_id"));
+  assertRequiredShopifyField(context.configPath, "name", readRecordString(context.appConfig, "name"));
   assertRequiredShopifyField(
-    context.shopify.configFile,
+    context.configPath,
     "application_url",
-    context.shopify.applicationUrl,
+    readRecordString(context.appConfig, "application_url"),
   );
 }
 

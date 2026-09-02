@@ -1,74 +1,72 @@
 import { join } from "node:path";
-import { getShopifyCliConfigName, loadShopifyAppConfig } from "./config";
-import type { RunnerCommand, RunnerConfig, RunnerContextBase } from "./types";
-import { normalizePathPart } from "#/utils/paths";
+import { loadTomlConfig } from "#/utils/config";
+import { isRecord } from "#/utils/objects";
+import { formatEnvFilesSummary, loadEnvNamespaces } from "./env-files";
+import type { RunnerConfig, RunnerContextBase } from "./types";
 
 export interface CreateRunnerContextOptions {
   cwd: string;
-  command: RunnerCommand;
   configName: string;
   runnerConfig: RunnerConfig;
 }
 
+export interface CreateRunnerContextResult {
+  context: RunnerContextBase;
+  envFileSummary: string | undefined;
+  envFileWarnings: string[];
+}
+
+/** Built-in context fields that `envFiles` namespaces must never shadow. */
+const RESERVED_CONTEXT_KEYS = new Set(["configPath", "env", "appConfig"]);
+const CONTEXT_KEY_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * Composes the runner context from the selected `bshopify.config.mjs`
+ * `configFiles` entry: the TOML file name, the environment name, and the raw
+ * TOML contents passed through as-is. Every `envFiles` namespace is loaded
+ * and attached as its own context field (`ctx.<key>`). No console output is
+ * emitted here; the caller prints `envFileSummary` / `envFileWarnings`.
+ */
 export async function createRunnerContext(
   options: CreateRunnerContextOptions,
-): Promise<RunnerContextBase> {
-  const { command, configName, cwd, runnerConfig } = options;
-  const configFile = runnerConfig.configFiles[configName];
+): Promise<CreateRunnerContextResult> {
+  const { configName, cwd, runnerConfig } = options;
+  const configPath = runnerConfig.configFiles[configName];
 
-  if (configFile === undefined || configFile.trim().length === 0) {
+  if (configPath === undefined || configPath.trim().length === 0) {
     throw new Error(`bshopify configFiles.${configName} is required.`);
   }
 
-  const effectiveConfigName = getShopifyCliConfigName(configFile);
-  const shopifyConfig = await loadShopifyAppConfig(join(cwd, configFile), configFile);
-  const appProxy = shopifyConfig.app_proxy === undefined
-    ? undefined
-    : createAppProxyContext(shopifyConfig.app_proxy, configFile);
-  const contextConfigName = effectiveConfigName ?? configName;
-  const env = contextConfigName === "production" ? "prod" : contextConfigName;
+  const appConfig = await loadTomlConfig(join(cwd, configPath));
 
-  return {
-    appProxy,
-    command,
-    configName: contextConfigName,
-    env,
-    extensionEnv: {
-      APP_ENV: env,
-      SHOPIFY_CONFIG_NAME: contextConfigName,
-      SHOPIFY_APP_PROXY_BASE: appProxy?.apiBase,
-      SHOPIFY_APP_PROXY_PREFIX: appProxy?.prefix,
-      SHOPIFY_APP_PROXY_SUBPATH: appProxy?.subpath,
-      SHOPIFY_APP_PROXY_TARGET_URL: appProxy?.targetUrl,
-    },
-    runtimeConfig: {},
-    shopify: {
-      applicationUrl: shopifyConfig.application_url,
-      appName: shopifyConfig.name,
-      cliConfigName: effectiveConfigName,
-      clientId: shopifyConfig.client_id,
-      configFile,
-      importantConfig: shopifyConfig.importantConfig,
-    },
+  if (!isRecord(appConfig)) {
+    throw new Error(`${configPath} must be a TOML object.`);
+  }
+
+  const context: RunnerContextBase = {
+    configPath,
+    env: configName,
+    appConfig,
   };
-}
+  const { namespaces, warnings } = await loadEnvNamespaces(cwd, runnerConfig.envFiles);
 
-function createAppProxyContext(
-  appProxy: { prefix: string; subpath: string; url: string },
-  configFile: string,
-) {
-  const prefix = normalizePathPart(appProxy.prefix);
-  const subpath = normalizePathPart(appProxy.subpath);
-  const targetUrl = appProxy.url.trim();
+  for (const [key, namespace] of Object.entries(namespaces)) {
+    if (!isSafeContextKey(key)) {
+      throw new Error(`bshopify envFiles key "${key}" is reserved.`);
+    }
 
-  if (!prefix || !subpath || !targetUrl) {
-    throw new Error(`${configFile} must define [app_proxy].prefix, subpath, and url.`);
+    context[key] = namespace.contents;
   }
 
   return {
-    apiBase: `/${prefix}/${subpath}`,
-    prefix,
-    subpath,
-    targetUrl,
+    context,
+    envFileSummary: formatEnvFilesSummary(namespaces),
+    envFileWarnings: warnings,
   };
+}
+
+function isSafeContextKey(key: string): boolean {
+  return CONTEXT_KEY_PATTERN.test(key)
+    && !RESERVED_CONTEXT_KEYS.has(key)
+    && !(key in Object.prototype);
 }

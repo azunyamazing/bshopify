@@ -1,12 +1,8 @@
-import { basename, join } from "node:path";
-import { loadOptionalDefaultExport, loadTomlConfig } from "#/utils/config";
-import {
-  isRecord,
-  toNonEmptyString,
-  toRequiredString,
-  toStringRecord,
-} from "#/utils/objects";
-import type { ShopifyImportantConfigItem, RunnerConfig, ShopifyAppConfig } from "./types";
+import { basename, isAbsolute, join, normalize, sep } from "node:path";
+import { loadOptionalDefaultExport } from "#/utils/config";
+import { isRecord, toNonEmptyString, toStringRecord } from "#/utils/objects";
+import { ansi, colorize } from "#/utils/output";
+import type { EnvFilesConfig, RunnerConfig } from "./types";
 
 export const defaultRunnerConfig: RunnerConfig = {
   configFiles: {
@@ -14,6 +10,7 @@ export const defaultRunnerConfig: RunnerConfig = {
     test: "shopify.app.test.toml",
     production: "shopify.app.production.toml",
   },
+  envFiles: {},
   // Internal defaults: not exposed in generated configs, but still loadable
   // from existing configs for backward compatibility.
   entryFileName: "__entry.js",
@@ -29,9 +26,11 @@ export async function loadRunnerConfig(cwd: string): Promise<RunnerConfig> {
   const configFiles = isRecord(loaded.configFiles)
     ? validateConfigFiles(toStringRecord(loaded.configFiles))
     : defaultRunnerConfig.configFiles;
+  const envFiles = parseEnvFiles(loaded.envFiles);
 
   return {
     configFiles,
+    envFiles,
     entryFileName: toNonEmptyString(loaded.entryFileName, defaultRunnerConfig.entryFileName),
     extensionsRoot: toNonEmptyString(loaded.extensionsRoot, defaultRunnerConfig.extensionsRoot),
     failOnUnresolvedPlaceholders:
@@ -43,13 +42,6 @@ export async function loadRunnerConfig(cwd: string): Promise<RunnerConfig> {
         ? loaded.restoreMarkers
         : defaultRunnerConfig.restoreMarkers,
   };
-}
-
-export async function loadShopifyAppConfig(
-  configPath: string,
-  displayPath: string,
-): Promise<ShopifyAppConfig> {
-  return loadShopifyAppConfigRecord(await loadTomlConfig(configPath), displayPath);
 }
 
 export function getShopifyCliConfigName(configFile: string): string | undefined {
@@ -92,80 +84,82 @@ function isRootShopifyAppConfigFile(configFile: string): boolean {
   );
 }
 
-function loadShopifyAppConfigRecord(value: unknown, displayPath: string): ShopifyAppConfig {
-  if (!isRecord(value)) {
-    throw new Error(`${displayPath} must be a TOML object.`);
+const RESERVED_ENV_FILE_KEYS = new Set(["configPath", "env", "appConfig"]);
+const ENV_FILE_KEY_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+function parseEnvFiles(value: unknown): EnvFilesConfig {
+  if (value === undefined) {
+    return {};
   }
 
-  const appProxy = isRecord(value.app_proxy)
-    ? {
-        prefix: toRequiredString(value.app_proxy.prefix, `${displayPath} [app_proxy].prefix`),
-        subpath: toRequiredString(value.app_proxy.subpath, `${displayPath} [app_proxy].subpath`),
-        url: toRequiredString(value.app_proxy.url, `${displayPath} [app_proxy].url`),
-      }
-    : undefined;
-
-  return {
-    app_proxy: appProxy,
-    application_url: typeof value.application_url === "string" ? value.application_url : undefined,
-    client_id: typeof value.client_id === "string" ? value.client_id : undefined,
-    importantConfig: collectImportantConfig(value),
-    name: typeof value.name === "string" ? value.name : undefined,
-  };
-}
-
-function collectImportantConfig(value: Record<string, unknown>): ShopifyImportantConfigItem[] {
-  const items: ShopifyImportantConfigItem[] = [];
-
-  pushStringItem(items, "application_url", value.application_url);
-
-  if (isRecord(value.webhooks)) {
-    pushStringItem(items, "webhooks.api_version", value.webhooks.api_version);
-    pushStringArrayItem(items, "webhooks.topics", value.webhooks.topics);
-
-    if (Array.isArray(value.webhooks.subscriptions)) {
-      value.webhooks.subscriptions.forEach((subscription, index) => {
-        if (!isRecord(subscription)) {
-          return;
-        }
-
-        pushStringArrayItem(
-          items,
-          `webhooks.subscriptions[${index}].topics`,
-          subscription.topics,
-        );
-        pushStringItem(items, `webhooks.subscriptions[${index}].uri`, subscription.uri);
-      });
-    }
+  if (isRecord(value)) {
+    return validateEnvFiles(value);
   }
 
-  return items;
-}
-
-function pushStringItem(
-  items: ShopifyImportantConfigItem[],
-  label: string,
-  value: unknown,
-): void {
-  if (typeof value === "string" && value.trim().length > 0) {
-    items.push({ label, value: value.trim() });
-  }
-}
-
-function pushStringArrayItem(
-  items: ShopifyImportantConfigItem[],
-  label: string,
-  value: unknown,
-): void {
-  if (!Array.isArray(value)) {
-    return;
-  }
-
-  const strings = value.filter(
-    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  console.warn(
+    colorize("bshopify envFiles must be an object; treated as empty.", ansi.yellow),
   );
+  return {};
+}
 
-  if (strings.length > 0) {
-    items.push({ label, value: strings.join(", ") });
+function validateEnvFiles(value: Record<string, unknown>): EnvFilesConfig {
+  const result: EnvFilesConfig = {};
+
+  for (const [key, entry] of Object.entries(value)) {
+    validateEnvFileKey(key);
+
+    if (typeof entry === "string") {
+      result[key] = validateEnvFilePath(key, entry);
+      continue;
+    }
+
+    if (
+      Array.isArray(entry)
+      && entry.length > 0
+      && entry.every((item) => typeof item === "string")
+    ) {
+      result[key] = (entry as string[]).map((path) => validateEnvFilePath(key, path));
+      continue;
+    }
+
+    throw new Error(
+      `bshopify envFiles.${key} must be a file path or a non-empty array of file paths.`,
+    );
   }
+
+  return result;
+}
+
+function validateEnvFileKey(key: string): void {
+  if (!ENV_FILE_KEY_PATTERN.test(key)) {
+    throw new Error(`bshopify envFiles key "${key}" must be a valid JavaScript identifier.`);
+  }
+
+  if (RESERVED_ENV_FILE_KEYS.has(key) || key in Object.prototype) {
+    throw new Error(`bshopify envFiles key "${key}" is reserved.`);
+  }
+}
+
+function validateEnvFilePath(key: string, path: string): string {
+  const trimmed = path.trim();
+
+  if (trimmed.length === 0) {
+    throw new Error(`bshopify envFiles.${key} path must not be empty.`);
+  }
+
+  if (isAbsolute(trimmed)) {
+    throw new Error(
+      `bshopify envFiles.${key} path must be relative to the project root: ${trimmed}`,
+    );
+  }
+
+  const normalized = normalize(trimmed);
+
+  if (normalized === ".." || normalized.startsWith(`..${sep}`)) {
+    throw new Error(
+      `bshopify envFiles.${key} path must stay inside the project root: ${trimmed}`,
+    );
+  }
+
+  return trimmed;
 }

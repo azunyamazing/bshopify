@@ -163,15 +163,22 @@ export default {
     production: "shopify.app.production.toml",
   },
 
+  // --- Extension: custom env injection (optional) ---
+  // envFiles: {
+  //   aEnv: ["config/a.json", "config/a.toml"],
+  //   bEnv: "config/b.json",
+  // },
+
   // --- Extension: injection behavior ---
   failOnUnresolvedPlaceholders: true,
 };
 ```
 
 - `configFiles`(app 级):环境名到项目根目录 Shopify app TOML 的映射,`bshopify app dev/deploy --config <name>` 按此选择。
+- `envFiles`(extension 级,可选):自定义注入 env 的命名空间映射,key → 一个或多个相对项目根目录的 JSON/TOML 文件路径。每个 key 会成为注入给 `__entry` 的 ctx 上的独立字段(如配置 `aEnv` → `ctx.aEnv`),多个文件内容按顺序浅合并,后面的文件覆盖前面的同名 key;文件内容必须是 JSON/TOML 对象。key 必须是合法 JS 标识符,且不能与 `configPath`/`env`/`appConfig` 冲突;路径必须位于项目根目录内(不支持绝对路径或 `../` 逃逸)。dev/deploy 开始时会在终端输出一行"Custom env files injected"提示,列出每个 key 实际加载的文件(全部缺失的 key 显示 `(none)`);某个文件缺失只打印 warning 并跳过,对应 key 保留其余文件合并结果(全部缺失时为 `{}`),不会中断命令;`envFiles` 本身不是对象时也只会 warning 并按空对象处理。格式不支持、解析失败或内容不是对象仍会直接报错。
 - `failOnUnresolvedPlaceholders`(extension 级):注入后若目标文件残留模板占位符则报错的行为开关。
 
-`extensionsRoot`、`entryFileName`、`restoreMarkers` 是内部默认(分别为 `extensions`、`__entry.js`、`true`),新项目不再写入配置文件;已有配置仍可覆盖,用于向后兼容。`init --update` 合并时只补齐 `configFiles`、`failOnUnresolvedPlaceholders`,不会覆盖用户已有的同名字段。
+`extensionsRoot`、`entryFileName`、`restoreMarkers` 是内部默认(分别为 `extensions`、`__entry.js`、`true`),新项目不再写入配置文件;已有配置仍可覆盖,用于向后兼容。`init --update` 合并时只补齐 `configFiles`、`failOnUnresolvedPlaceholders`,不会覆盖用户已有的同名字段(包括 `envFiles`)。
 
 ## dev 命令
 
@@ -215,12 +222,11 @@ src/
       dev/         # app dev 编排入口
       deploy/      # app deploy 编排入口
       init/        # app init 初始化流程，按 checks/files/git-hooks/manifest/types 拆分
-    runner/        # app 运行管线：上下文、配置、锁、事务、注入执行、Shopify CLI 调用
+    runner/        # app 运行管线：上下文、配置、envFiles 加载、锁、事务、注入执行、Shopify CLI 调用
   extension/       # extension 域（受管单元层）：Shopify extension 及其 entry，只被 app 依赖
     types.ts       # ExtensionInfo / ExtensionLifecycle / ManagedEntry 等扩展域类型
     entries.ts     # 扩展发现 + entry 加载 + 生命周期编排（prepare/validate/beforeDeploy/...）
     entry-loader.ts# 运行时加载扩展 entry 模块
-    context.ts     # 由 app 上下文派生单扩展上下文（app × extension 组合点）
     manage.ts      # init 时的 entry 写入/清理/重命名（与 app 通过结构化类型解耦）
     manage-stale.ts# entry 旧坐标清理与重命名
     manage-content.ts # entry 模板与内容哈希

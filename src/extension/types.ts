@@ -12,18 +12,6 @@ export interface ExtensionInfo {
   root: string;
 }
 
-/**
- * Environment values bshopify prepares for extensions from the app context.
- */
-export interface ExtensionEnv {
-  APP_ENV: string;
-  SHOPIFY_APP_PROXY_BASE?: string;
-  SHOPIFY_APP_PROXY_PREFIX?: string;
-  SHOPIFY_APP_PROXY_SUBPATH?: string;
-  SHOPIFY_APP_PROXY_TARGET_URL?: string;
-  SHOPIFY_CONFIG_NAME: string;
-}
-
 export interface InjectionPlan {
   file: string;
   pattern: string;
@@ -81,9 +69,7 @@ export interface PreparedExtensionPlan {
 }
 
 /**
- * The runtime context handed to one extension: the app-level context
- * (`RunnerContextBase`) composed with the current extension scope.
+ * The runtime context handed to one extension's `__entry` lifecycle: exactly
+ * the app-level runner context (`configPath` / `env` / `appConfig`).
  */
-export interface ExtensionContext extends RunnerContextBase {
-  extension: ExtensionInfo;
-}
+export type ExtensionContext = RunnerContextBase;

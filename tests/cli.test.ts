@@ -35,6 +35,7 @@ import {
 } from "../src";
 import { findManagedEntries, loadManagedEntryHooks } from "../src/extension/entries";
 import { defaultRunnerConfig } from "../src/app/runner/config";
+import type { RunnerContextBase } from "../src/app/runner/types";
 
 interface CommandWithRuntimeHiddenFlag {
   _hidden?: boolean;
@@ -51,28 +52,6 @@ interface TsConfigFixture {
   compilerOptions?: {
     baseUrl?: string;
     paths?: Record<string, string[]>;
-  };
-}
-
-interface DeploySummaryContextFixture {
-  appProxy?: {
-    apiBase: string;
-    prefix: string;
-    subpath: string;
-    targetUrl: string;
-  };
-  command: "deploy";
-  configName: string;
-  env: string;
-  extensionEnv: {
-    APP_ENV: string;
-    SHOPIFY_CONFIG_NAME: string;
-  };
-  runtimeConfig: Record<string, unknown>;
-  shopify: {
-    applicationUrl?: string;
-    configFile: string;
-    importantConfig: Array<{ label: string; value: string }>;
   };
 }
 
@@ -122,13 +101,12 @@ async function createDevProject(): Promise<string> {
       "export default {",
       "  async prepare(ctx) {",
       "    return {",
-      "      extension: ctx.extension.name,",
       "      injections: [",
       "        {",
       '          file: "blocks/app-embed.liquid",',
       '          strategy: "replace",',
       '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
-      "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+      "          value: ctx.appConfig.app_proxy ? `/${ctx.appConfig.app_proxy.prefix}/${ctx.appConfig.app_proxy.subpath}` : undefined,",
       "        },",
       "      ],",
       "    };",
@@ -201,21 +179,12 @@ describe("bshopify CLI", () => {
   it("formats deploy summaries as a prominent block with long values on their own lines", () => {
     const output = formatDeploySummary(
       {
-        appProxy: undefined,
-        command: "deploy",
-        configName: "test",
+        configPath: "shopify.app.test.toml",
         env: "test",
-        extensionEnv: {
-          APP_ENV: "test",
-          SHOPIFY_CONFIG_NAME: "test",
+        appConfig: {
+          application_url: "https://api.platform.test.standhigher.com/api/v2/shopify/entry/test",
         },
-        runtimeConfig: {},
-        shopify: {
-          applicationUrl: "https://api.platform.test.standhigher.com/api/v2/shopify/entry/test",
-          configFile: "shopify.app.test.toml",
-          importantConfig: [],
-        },
-      } as DeploySummaryContextFixture,
+      } as RunnerContextBase,
       [],
       false,
     );
@@ -229,30 +198,12 @@ describe("bshopify CLI", () => {
   it("omits imported production config review details from deploy summaries", () => {
     const output = formatDeploySummary(
       {
-        appProxy: undefined,
-        command: "deploy",
-        configName: "production",
+        configPath: "shopify.app.production.toml",
         env: "production",
-        extensionEnv: {
-          APP_ENV: "production",
-          SHOPIFY_CONFIG_NAME: "production",
+        appConfig: {
+          application_url: "https://api.platform.test.standhigher.com/api/v2/shopify/entry/production",
         },
-        runtimeConfig: {},
-        shopify: {
-          applicationUrl: "https://api.platform.test.standhigher.com/api/v2/shopify/entry/production",
-          configFile: "shopify.app.production.toml",
-          importantConfig: [
-            {
-              label: "application_url",
-              value: "https://api.platform.test.standhigher.com/api/v2/shopify/entry/production",
-            },
-            {
-              label: "webhooks.api_version",
-              value: "2026-01",
-            },
-          ],
-        },
-      } as DeploySummaryContextFixture,
+      } as RunnerContextBase,
       [],
       false,
     );
@@ -465,7 +416,6 @@ describe("bshopify CLI", () => {
     );
     expect(extensionSourceFiles.map((file) => file.path).sort()).toEqual(
       expect.arrayContaining([
-        join(process.cwd(), "src", "extension", "context.ts"),
         join(process.cwd(), "src", "extension", "entries.ts"),
         join(process.cwd(), "src", "extension", "entry-loader.ts"),
         join(process.cwd(), "src", "extension", "manage-content.ts"),
@@ -794,6 +744,363 @@ describe("devProject", () => {
     expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "dev"]);
   });
 
+  it("injects values from custom envFiles namespaces into extension templates", async () => {
+    const cwd = await createDevProject();
+    await mkdir(join(cwd, "config"), { recursive: true });
+    await writeFile(
+      join(cwd, "config", "a.json"),
+      `${JSON.stringify({ gateway: "https://gw.example.test" })}\n`,
+    );
+    await writeFile(
+      join(cwd, "config", "a2.toml"),
+      [
+        'gateway = "https://gw.override.test"',
+        'other = "from-toml"',
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      join(cwd, "config", "b.json"),
+      `${JSON.stringify({ flag: true, label: "b" })}\n`,
+    );
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        "  envFiles: {",
+        '    aEnv: ["config/a.json", "config/a2.toml"],',
+        '    bEnv: "config/b.json",',
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    await writeFile(
+      targetPath,
+      '<div data-gateway="__CUSTOM_GATEWAY__" data-flag="__ENV_B_FLAG__" data-other="__AENV_OTHER__"></div>\n',
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      [
+        "export default {",
+        "  async prepare(ctx) {",
+        "    return {",
+        "      injections: [",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__CUSTOM_GATEWAY__",',
+        "          value: ctx.aEnv.gateway,",
+        "        },",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__ENV_B_FLAG__",',
+        "          value: String(ctx.bEnv.flag),",
+        "        },",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__AENV_OTHER__",',
+        "          value: ctx.aEnv.other,",
+        "        },",
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => {
+      const current = await readFile(targetPath, "utf8");
+
+      expect(current).toContain('data-gateway="https://gw.override.test"');
+      expect(current).toContain('data-flag="true"');
+      expect(current).toContain('data-other="from-toml"');
+      return 0;
+    });
+
+    let output = "";
+
+    try {
+      await devProject({ cwd, runShopifyCommand });
+      output = log.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(output).toContain("\u001B[1m\u001B[36mCustom env files injected\u001B[39m\u001B[22m");
+    expect(output).toContain(
+      "\u001B[36maEnv\u001B[39m \u001B[90m->\u001B[39m \u001B[35mconfig/a.json\u001B[39m, \u001B[35mconfig/a2.toml\u001B[39m",
+    );
+    expect(output).toContain(
+      "\u001B[36mbEnv\u001B[39m \u001B[90m->\u001B[39m \u001B[35mconfig/b.json\u001B[39m",
+    );
+
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(
+      '<div data-gateway="__CUSTOM_GATEWAY__" data-flag="__ENV_B_FLAG__" data-other="__AENV_OTHER__"></div>\n',
+    );
+  });
+
+  it("rejects invalid envFiles keys in the runner config", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        '  envFiles: { "bad-key": "config/a.json" },',
+        "};",
+        "",
+      ].join("\n"),
+    );
+
+    await expect(
+      devProject({ cwd, runShopifyCommand: vi.fn(async () => 0) }),
+    ).rejects.toThrow(
+      'bshopify envFiles key "bad-key" must be a valid JavaScript identifier.',
+    );
+  });
+
+  it("warns and keeps dev running with an empty namespace when an envFiles path is missing", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        '  envFiles: { aEnv: "config/missing.json" },',
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    await writeFile(targetPath, '<div data-size="__AENV_SIZE__"></div>\n');
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      [
+        "export default {",
+        "  async prepare(ctx) {",
+        "    return {",
+        "      injections: [",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__AENV_SIZE__",',
+        "          value: String(Object.keys(ctx.aEnv).length),",
+        "        },",
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => {
+      const current = await readFile(targetPath, "utf8");
+
+      expect(current).toContain('data-size="0"');
+      return 0;
+    });
+    let warningOutput = "";
+    let logOutput = "";
+
+    try {
+      await devProject({ cwd, runShopifyCommand });
+      warningOutput = warn.mock.calls.map(([message]) => String(message)).join("\n");
+      logOutput = log.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+    }
+
+    expect(warningOutput).toContain(
+      "bshopify envFiles.aEnv config/missing.json does not exist; skipped.",
+    );
+    expect(logOutput).toContain(
+      "\u001B[36maEnv\u001B[39m \u001B[90m->\u001B[39m \u001B[90m(none)\u001B[39m",
+    );
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(
+      '<div data-size="__AENV_SIZE__"></div>\n',
+    );
+  });
+
+  it("merges surviving files and warns when one envFiles path is missing", async () => {
+    const cwd = await createDevProject();
+    await mkdir(join(cwd, "config"), { recursive: true });
+    await writeFile(join(cwd, "config", "a.json"), `${JSON.stringify({ gateway: "kept" })}\n`);
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        '  envFiles: { aEnv: ["config/a.json", "config/missing.toml"] },',
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    await writeFile(targetPath, '<div data-gateway="__AENV_GATEWAY__"></div>\n');
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      [
+        "export default {",
+        "  async prepare(ctx) {",
+        "    return {",
+        "      injections: [",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__AENV_GATEWAY__",',
+        "          value: ctx.aEnv.gateway,",
+        "        },",
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => {
+      await expect(readFile(targetPath, "utf8")).resolves.toContain('data-gateway="kept"');
+      return 0;
+    });
+    let warningOutput = "";
+
+    try {
+      await devProject({ cwd, runShopifyCommand });
+      warningOutput = warn.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(warningOutput).toContain(
+      "bshopify envFiles.aEnv config/missing.toml does not exist; skipped.",
+    );
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(
+      '<div data-gateway="__AENV_GATEWAY__"></div>\n',
+    );
+  });
+
+  it("warns and treats envFiles as empty when it is not an object", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      'export default { envFiles: "config/a.json" };\n',
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => 0);
+    let warningOutput = "";
+
+    try {
+      await devProject({ cwd, runShopifyCommand });
+      warningOutput = warn.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(warningOutput).toContain(
+      "bshopify envFiles must be an object; treated as empty.",
+    );
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "dev"]);
+  });
+
+  it("loads envFiles JSON files that start with a BOM", async () => {
+    const cwd = await createDevProject();
+    await mkdir(join(cwd, "config"), { recursive: true });
+    await writeFile(join(cwd, "config", "a.json"), `\uFEFF${JSON.stringify({ gateway: "bom" })}\n`);
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      'export default { envFiles: { aEnv: "config/a.json" } };\n',
+    );
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    await writeFile(targetPath, '<div data-gateway="__AENV_GATEWAY__"></div>\n');
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      [
+        "export default {",
+        "  async prepare(ctx) {",
+        "    return {",
+        "      injections: [",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__AENV_GATEWAY__",',
+        "          value: ctx.aEnv.gateway,",
+        "        },",
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const runShopifyCommand = vi.fn(async () => {
+      await expect(readFile(targetPath, "utf8")).resolves.toContain('data-gateway="bom"');
+      return 0;
+    });
+
+    await devProject({ cwd, runShopifyCommand });
+  });
+
+  it("rejects envFiles files whose content is not an object", async () => {
+    const cwd = await createDevProject();
+    await mkdir(join(cwd, "config"), { recursive: true });
+    await writeFile(join(cwd, "config", "a.json"), '[1, 2, 3]\n');
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      'export default { envFiles: { aEnv: "config/a.json" } };\n',
+    );
+
+    await expect(
+      devProject({ cwd, runShopifyCommand: vi.fn(async () => 0) }),
+    ).rejects.toThrow("bshopify envFiles.aEnv config/a.json must be a JSON/TOML object.");
+  });
+
+  it("rejects envFiles files with unsupported extensions", async () => {
+    const cwd = await createDevProject();
+    await mkdir(join(cwd, "config"), { recursive: true });
+    await writeFile(join(cwd, "config", "a.yaml"), "gateway: yaml\n");
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      'export default { envFiles: { aEnv: "config/a.yaml" } };\n',
+    );
+
+    await expect(
+      devProject({ cwd, runShopifyCommand: vi.fn(async () => 0) }),
+    ).rejects.toThrow("bshopify envFiles config/a.yaml must be a .json or .toml file.");
+  });
+
+  it("rejects envFiles keys reserved by the runner context", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      'export default { envFiles: { appConfig: "config/a.json" } };\n',
+    );
+
+    await expect(
+      devProject({ cwd, runShopifyCommand: vi.fn(async () => 0) }),
+    ).rejects.toThrow('bshopify envFiles key "appConfig" is reserved.');
+  });
+
+  it("does not print the envFiles hint when envFiles is not configured", async () => {
+    const cwd = await createDevProject();
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const runShopifyCommand = vi.fn(async () => 0);
+    let output = "";
+
+    try {
+      await devProject({ cwd, runShopifyCommand });
+      output = log.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(output).not.toContain("Custom env files injected");
+  });
+
   it("uses the selected config for app dev context and Shopify CLI", async () => {
     const cwd = await createDevProject();
     await writeFile(
@@ -946,19 +1253,18 @@ describe("devProject", () => {
         "export default {",
         "  async prepare(ctx) {",
         "    return {",
-        "      extension: ctx.extension.name,",
         "      injections: [",
         "        {",
         '          file: "blocks/app-embed.liquid",',
         '          strategy: "replace",',
         '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
-        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "          value: ctx.appConfig.app_proxy ? `/${ctx.appConfig.app_proxy.prefix}/${ctx.appConfig.app_proxy.subpath}` : undefined,",
         "        },",
         "        {",
         '          file: "blocks/app-embed.liquid",',
         '          strategy: "replace",',
         '          pattern: "__SHOPIFY_CONFIG_NAME__",',
-        "          value: ctx.extensionEnv.SHOPIFY_CONFIG_NAME,",
+        "          value: ctx.env,",
         "        },",
         "      ],",
         "    };",
@@ -1151,7 +1457,7 @@ describe("devProject", () => {
         "      injections: [",
         ...cases.map(
           ({ file }) =>
-            `        { file: ${JSON.stringify(file)}, strategy: "replace", pattern: "__SHOPIFY_APP_PROXY_BASE__", value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE },`,
+            `        { file: ${JSON.stringify(file)}, strategy: "replace", pattern: "__SHOPIFY_APP_PROXY_BASE__", value: ctx.appConfig.app_proxy ? \`/\${ctx.appConfig.app_proxy.prefix}/\${ctx.appConfig.app_proxy.subpath}\` : undefined },`,
         ),
         "      ],",
         "    };",
@@ -1226,13 +1532,13 @@ describe("devProject", () => {
         '          file: "blocks/app-embed.liquid",',
         '          strategy: "replace",',
         '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
-        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "          value: ctx.appConfig.app_proxy ? `/${ctx.appConfig.app_proxy.prefix}/${ctx.appConfig.app_proxy.subpath}` : undefined,",
         "        },",
         "        {",
         '          file: "assets/productBlock.tsx",',
         '          strategy: "replace",',
         '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
-        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "          value: ctx.appConfig.app_proxy ? `/${ctx.appConfig.app_proxy.prefix}/${ctx.appConfig.app_proxy.subpath}` : undefined,",
         "        },",
         "      ],",
         "    };",
@@ -1286,13 +1592,13 @@ describe("devProject", () => {
         '          file: "blocks/app-embed.liquid",',
         '          strategy: "replace",',
         '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
-        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "          value: ctx.appConfig.app_proxy ? `/${ctx.appConfig.app_proxy.prefix}/${ctx.appConfig.app_proxy.subpath}` : undefined,",
         "        },",
         "        {",
         '          file: "assets/app.js",',
         '          strategy: "replace",',
         '          pattern: "__SHOPIFY_APP_PROXY_BASE__",',
-        "          value: ctx.extensionEnv.SHOPIFY_APP_PROXY_BASE,",
+        "          value: ctx.appConfig.app_proxy ? `/${ctx.appConfig.app_proxy.prefix}/${ctx.appConfig.app_proxy.subpath}` : undefined,",
         "        },",
         "      ],",
         "    };",
@@ -1675,6 +1981,69 @@ describe("deployProject", () => {
     });
     expect(exitCode).toBe(0);
     expect(runShopifyCommand).toHaveBeenCalledWith(["app", "deploy", "--config", "test"]);
+  });
+
+  it("injects custom envFiles values during deploy dry-runs", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "shopify.app.test.toml"),
+      [...createShopifyBasicConfig("https://test.example.com"), ""].join("\n"),
+    );
+    await mkdir(join(cwd, "config"), { recursive: true });
+    await writeFile(join(cwd, "config", "a.json"), `${JSON.stringify({ gateway: "deploy-gw" })}\n`);
+    await writeFile(
+      join(cwd, "bshopify.config.mjs"),
+      [
+        "export default {",
+        '  envFiles: { aEnv: "config/a.json" },',
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    await writeFile(targetPath, '<div data-gateway="__AENV_GATEWAY__"></div>\n');
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      [
+        "export default {",
+        "  async prepare(ctx) {",
+        "    return {",
+        "      injections: [",
+        "        {",
+        '          file: "blocks/app-embed.liquid",',
+        '          strategy: "replace",',
+        '          pattern: "__AENV_GATEWAY__",',
+        "          value: ctx.aEnv.gateway,",
+        "        },",
+        "      ],",
+        "    };",
+        "  },",
+        "};",
+        "",
+      ].join("\n"),
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let output = "";
+
+    try {
+      await deployProject({
+        configName: "test",
+        cwd,
+        dryRun: true,
+        runShopifyCommand: vi.fn(async () => 0),
+      });
+      output = log.mock.calls.map(([message]) => String(message)).join("\n");
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(output).toContain("\u001B[1m\u001B[36mCustom env files injected\u001B[39m\u001B[22m");
+    expect(output).toContain(
+      "\u001B[36maEnv\u001B[39m \u001B[90m->\u001B[39m \u001B[35mconfig/a.json\u001B[39m",
+    );
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(
+      '<div data-gateway="__AENV_GATEWAY__"></div>\n',
+    );
   });
 
   it("restores stale hidden deploy entries before preparing plans", async () => {

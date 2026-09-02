@@ -1,5 +1,3 @@
-import type { ExtensionEnv } from "#/extension/types";
-
 export type ShopifyCommandRunner = (args: string[]) => Promise<number | void>;
 
 export interface DevOptions {
@@ -22,14 +20,16 @@ export interface DeployOptions {
 /**
  * bshopify runner configuration loaded from `bshopify.config.mjs`.
  *
- * Only `configFiles` and `failOnUnresolvedPlaceholders` are meant to be
- * configured by the team. `extensionsRoot`, `entryFileName`, and
+ * Only `configFiles`, `envFiles`, and `failOnUnresolvedPlaceholders` are
+ * meant to be configured by the team. `extensionsRoot`, `entryFileName`, and
  * `restoreMarkers` are internal defaults: new projects do not expose them,
  * but existing configs may still override them for backward compatibility.
  */
 export interface RunnerConfig {
   /** App: Shopify app config files by environment. */
   configFiles: ConfigFileMap;
+  /** Extension: custom env namespaces injected into the runner context. */
+  envFiles: EnvFilesConfig;
   /** Internal default: bshopify-managed entry file name. */
   entryFileName: string;
   /** Internal default: directory that contains Shopify extension folders. */
@@ -40,55 +40,35 @@ export interface RunnerConfig {
   restoreMarkers: boolean;
 }
 
+/**
+ * Custom env namespaces for extension injection, configured as
+ * `envFiles` in `bshopify.config.mjs`: key → one or more root-relative
+ * JSON/TOML file paths. Each key becomes its own field on the runner context
+ * (e.g. `aEnv` → `ctx.aEnv`), with the referenced file contents merged.
+ */
+export interface EnvFilesConfig {
+  [key: string]: string | string[];
+}
+
 export interface ConfigFileMap {
   [key: string]: string;
 }
 
-export interface ShopifyAppProxyConfig {
-  prefix: string;
-  subpath: string;
-  url: string;
-}
-
-export interface ShopifyAppConfig {
-  app_proxy?: ShopifyAppProxyConfig;
-  application_url?: string;
-  client_id?: string;
-  importantConfig: ShopifyImportantConfigItem[];
-  name?: string;
-}
-
-export interface AppProxyContext {
-  apiBase: string;
-  prefix: string;
-  subpath: string;
-  targetUrl: string;
-}
-
-export interface ShopifyImportantConfigItem {
-  label: string;
-  value: string;
-}
-
-export type RunnerCommand = "dev" | "deploy" | "dryRun";
-
-export interface ShopifyContext {
-  applicationUrl?: string;
-  appName?: string;
-  cliConfigName?: string;
-  clientId?: string;
-  configFile: string;
-  importantConfig: ShopifyImportantConfigItem[];
-}
-
+/**
+ * The runtime context handed to app orchestration and to each extension's
+ * `__entry` lifecycle. `configPath` / `env` / `appConfig` come from the
+ * enabled Shopify app TOML; every additional key is a custom env namespace
+ * injected from `bshopify.config.mjs` `envFiles` (key → merged file contents).
+ */
 export interface RunnerContextBase {
-  appProxy?: AppProxyContext;
-  command: RunnerCommand;
-  configName: string;
+  /** Currently enabled Shopify app TOML file name (`configFiles.<env>` value). */
+  configPath: string;
+  /** The `configFiles` key of the current environment (e.g. `dev`, `test`, `production`). */
   env: string;
-  extensionEnv: ExtensionEnv;
-  runtimeConfig: RuntimeConfig;
-  shopify: ShopifyContext;
+  /** Parsed contents of the TOML file, passed through as-is. */
+  appConfig: Record<string, unknown>;
+  /** Custom env namespaces injected from `envFiles` (key → merged contents). */
+  [envNamespace: string]: unknown;
 }
 
 export interface FileTransaction {
@@ -111,8 +91,4 @@ export interface TrackedFile {
 export interface HiddenFile {
   hiddenPath: string;
   path: string;
-}
-
-export interface RuntimeConfig {
-  [key: string]: unknown;
 }

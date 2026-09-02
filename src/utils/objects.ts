@@ -25,3 +25,12 @@ export function toStringRecord(value: UnknownRecord): Record<string, string> {
 
   return Object.fromEntries(entries);
 }
+
+/** Reads a string field from a record, returning `undefined` for non-strings or blank values. */
+export function readRecordString(
+  record: UnknownRecord,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}

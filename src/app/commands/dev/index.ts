@@ -1,7 +1,12 @@
 import { join } from "node:path";
 import { bshopifyStateDir } from "#/app/runner/constants";
-import { formatShopifyCliConfigArgs, loadRunnerConfig } from "#/app/runner/config";
+import {
+  formatShopifyCliConfigArgs,
+  getShopifyCliConfigName,
+  loadRunnerConfig,
+} from "#/app/runner/config";
 import { createRunnerContext } from "#/app/runner/context";
+import { printEnvFilesOutput } from "#/app/runner/env-files";
 import {
   findManagedEntries,
   loadManagedEntryHooks,
@@ -30,12 +35,12 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
   const shopifyArgs = options.shopifyArgs ?? [];
   const shouldForwardCliConfig = options.configName !== undefined || shopifyArgs.length === 0;
   const config = await loadRunnerConfig(cwd);
-  const context = await createRunnerContext({
-    command: "dev",
+  const { context, envFileSummary, envFileWarnings } = await createRunnerContext({
     configName,
     cwd,
     runnerConfig: config,
   });
+  printEnvFilesOutput(envFileSummary, envFileWarnings);
   const lock = await acquireLock(cwd, bshopifyStateDir);
   const transactionPath = join(cwd, bshopifyStateDir, "extension-prepare.transaction.json");
 
@@ -78,7 +83,7 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       }
 
       const injectionSummary = formatAppliedInjections(appliedInjections, {
-        configName: shouldForwardCliConfig ? context.shopify.cliConfigName : undefined,
+        configName: shouldForwardCliConfig ? getShopifyCliConfigName(context.configPath) : undefined,
         cwd,
       });
 
@@ -95,7 +100,7 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       const exitCode = await runShopifyCommand([
         "app",
         "dev",
-        ...(shouldForwardCliConfig ? formatShopifyCliConfigArgs(context.shopify.cliConfigName) : []),
+        ...(shouldForwardCliConfig ? formatShopifyCliConfigArgs(getShopifyCliConfigName(context.configPath)) : []),
         ...shopifyArgs,
       ]);
 
