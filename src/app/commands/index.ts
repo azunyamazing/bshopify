@@ -1,12 +1,19 @@
 import { Command } from "commander";
+import { clearProject, formatClearResult } from "./clear";
 import { deployProject } from "./deploy";
 import {
   formatInitResult,
   initProject,
 } from "./init";
 import { devProject } from "./dev";
+import type { ClearOptions, ClearResult } from "./clear/types";
 import type { InitOptions, InitResult } from "./init/types";
 import type { DeployOptions, DevOptions } from "../runner/types";
+
+interface ClearCommandOptions {
+  cwd?: string;
+  yes?: boolean;
+}
 
 interface DeployCommandOptions {
   config?: string;
@@ -28,14 +35,16 @@ interface InitCommandOptions {
 }
 
 export interface AppCommandDependencies {
+  clearProject?: (options?: ClearOptions) => Promise<ClearResult>;
   runDeploy?: (options?: DeployOptions) => Promise<number | void>;
   runDev?: (options?: DevOptions) => Promise<number | void>;
   initProject?: (options?: InitOptions) => Promise<InitResult>;
 }
 
-const localAppCommands = new Set(["deploy", "dev", "guard", "init"]);
+const localAppCommands = new Set(["clear", "deploy", "dev", "guard", "init"]);
 
 export function createAppCommand(dependencies: AppCommandDependencies = {}): Command {
+  const runClear = dependencies.clearProject ?? clearProject;
   const runDeploy = dependencies.runDeploy ?? deployProject;
   const runDev = dependencies.runDev ?? devProject;
   const initializeProject = dependencies.initProject ?? initProject;
@@ -43,6 +52,23 @@ export function createAppCommand(dependencies: AppCommandDependencies = {}): Com
     "BestFulfill wrappers for Shopify app commands.",
   );
   appCommand.addHelpCommand(false);
+
+  appCommand
+    .command("clear")
+    .description("Remove all bshopify-generated files from the current app project.")
+    .option("--cwd <path>", "project directory to clear")
+    .option("--yes", "skip the interactive removal confirmation")
+    .action(async (options: ClearCommandOptions) => {
+      const result = await runClear({
+        cwd: options.cwd,
+        yes: options.yes === true,
+      });
+      console.log(formatClearResult(result));
+
+      if (result.errors.length > 0) {
+        process.exitCode = 1;
+      }
+    });
 
   appCommand
     .command("init")

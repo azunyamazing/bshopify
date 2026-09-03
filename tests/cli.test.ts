@@ -272,6 +272,7 @@ describe("bshopify CLI", () => {
 
     expect(commands).toEqual(["app"]);
     expect(appCommand?.commands.map((command) => command.name()).sort()).toEqual([
+      "clear",
       "deploy",
       "dev",
       "guard",
@@ -284,6 +285,7 @@ describe("bshopify CLI", () => {
 
     expect(appCommand.name()).toBe("app");
     expect(appCommand.commands.map((command) => command.name()).sort()).toEqual([
+      "clear",
       "deploy",
       "dev",
       "guard",
@@ -492,6 +494,35 @@ describe("bshopify CLI", () => {
       check: true,
       cwd: "/tmp/shopify-app",
       update: true,
+    });
+  });
+
+  it("dispatches bshopify app clear to the local clearer", async () => {
+    const clearProject = vi.fn(async () => ({
+      errors: [],
+      removed: [],
+      updated: [],
+      warnings: [],
+    }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    try {
+      await createCliProgram({ clearProject }).parseAsync([
+        "node",
+        "bshopify",
+        "app",
+        "clear",
+        "--cwd",
+        "/tmp/shopify-app",
+        "--yes",
+      ]);
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(clearProject).toHaveBeenCalledWith({
+      cwd: "/tmp/shopify-app",
+      yes: true,
     });
   });
 

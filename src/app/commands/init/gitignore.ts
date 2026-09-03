@@ -4,7 +4,7 @@ import { bshopifyStateDir } from "#/app/runner/constants";
 import { isNodeError } from "#/utils/node";
 import type { InitResult } from "./types";
 
-const gitignoreCliComment = "# bshopify cli";
+export const gitignoreCliComment = "# bshopify cli";
 
 export async function ensureGitignoreEntry(
   cwd: string,

@@ -59,6 +59,8 @@ function getSectionStyle(label: string): SectionStyle {
   switch (label) {
     case "created":
       return { color: ansi.green, prefix: "+", title: "Created" };
+    case "removed":
+      return { color: ansi.red, prefix: "-", title: "Removed" };
     case "updated":
       return { color: ansi.cyan, prefix: "~", title: "Updated" };
     case "skipped":

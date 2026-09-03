@@ -92,6 +92,7 @@ node dist/cli.js --help
 | `bshopify app init` | 初始化项目接入文件、配置、Git hook 和 Extension Entry |
 | `bshopify app dev` | 临时注入 Extension Entry 产物，按配置文件路径推导 Shopify config 名并执行 `shopify app dev --config <name>`，结束后恢复占位符 |
 | `bshopify app guard` | 阻止真实注入值或持锁状态进入提交 |
+| `bshopify app clear` | 删除当前 app 项目里 bshopify 生成的全部文件（`.bshopify/`、`bshopify.config.mjs`、生成的 entry 等），并还原 Git hook / filter / ignore 接入 |
 
 未被 bshopify 接管的命令会降级到 Shopify CLI，例如：
 
@@ -149,6 +150,25 @@ bshopify app init --update
 ```bash
 bshopify app init --cwd ./path/to/shopify-app
 ```
+
+## clear 命令
+
+`clear` 与 `init` 相反：把当前 app 项目恢复到接入 bshopify 之前的状态，删除 bshopify 生成的全部文件并还原其修改过的文件。**不会删除你自己的代码**：
+
+```bash
+bshopify app clear
+```
+
+执行后删除/还原以下内容：
+
+- `.bshopify/` 状态目录（manifest、`git-add-cleaner.js`、dev/deploy 的 lock 与 transaction journal 等运行时文件）；
+- `bshopify.config.mjs` runner 配置；
+- manifest 中记录的、仍是生成模板内容的 extension entry（`__entry.js` 等）——**改写过自定义逻辑的 entry 会保留**，只给出提示；
+- `.gitignore` / `.gitattributes` 里 `init` 追加的 `# bshopify cli` 块；
+- pre-commit hook 里的 bshopify guard block（hook 本身是 bshopify 生成的模板时整文件删除，含用户内容的只去掉 guard block）；
+- 本地 git config 的 `filter.bshopify.*`（值被改过的话保留并提示）。
+
+若 `bshopify app dev` / `app deploy` 正在运行（prepare 锁被活跃进程持有），`clear` 会直接拒绝执行并提示先停止该进程，避免破坏运行中的注入会话；若存在崩溃遗留的未恢复注入事务（如 dev 被 kill 留下的 journal），`clear` 会先按 journal 还原注入值再删除状态目录。命令默认交互确认，`--yes` 跳过确认；可用 `--cwd <path>` 指定项目目录。
 
 ## 配置
 
