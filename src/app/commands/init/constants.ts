@@ -79,16 +79,19 @@ const markerBytes = Buffer.from("bshopify-restore:");
 // Current marker format embeds the gap length; the legacy patterns match
 // markers written before gapLength existed (restored with an implicit gap
 // of zero). Both formats are needed so files injected by older versions of
-// bshopify still restore.
+// bshopify still restore. The markerPatterns order mirrors
+// restore-markers.ts; legacyFormats below lists the legacy indexes.
 const markerPatterns = [
   /\/\* bshopify-restore:([A-Za-z0-9_-]+):(\d+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \*\//g,
   /<!-- bshopify-restore:([A-Za-z0-9_-]+):(\d+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) -->/g,
   /\{\/\* bshopify-restore:([A-Za-z0-9_-]+):(\d+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \*\/\}/g,
   /\{% comment %} bshopify-restore:([A-Za-z0-9_-]+):(\d+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \{% endcomment %\}/g,
+  / # bshopify-restore:([A-Za-z0-9_-]+):(\d+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+)/g,
   /\/\* bshopify-restore:([A-Za-z0-9_-]+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \*\//g,
   /<!-- bshopify-restore:([A-Za-z0-9_-]+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) -->/g,
   /\{\/\* bshopify-restore:([A-Za-z0-9_-]+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \*\/\}/g,
   /\{% comment %} bshopify-restore:([A-Za-z0-9_-]+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+) \{% endcomment %\}/g,
+  / # bshopify-restore:([A-Za-z0-9_-]+):(\d+):([0-9a-fA-F]{16}):([0-9a-fA-F-]+)/g,
 ];
 
 // 64-bit FNV-1a-style checksum over UTF-16 code units. Must stay identical
@@ -106,7 +109,7 @@ function createValueChecksum(value) {
 
 function findMarkers(content) {
   const markers = [];
-  const legacyFormats = [4, 5, 6, 7];
+  const legacyFormats = [5, 6, 7, 8, 9];
 
   for (let patternIndex = 0; patternIndex < markerPatterns.length; patternIndex += 1) {
     const pattern = markerPatterns[patternIndex];

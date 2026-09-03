@@ -6,23 +6,24 @@ import { extname } from "node:path";
  * When a placeholder sits inside a quoted string literal, appending the
  * restore-marker comment right after the injected value would make the
  * comment part of the string's runtime value (e.g. `value: "__URL__"` would
- * become `value: "https://x.com/* bshopify-restore:... *\/"`). The injection
- * must place the marker after the string's closing delimiter (or after the
- * whole enclosing Liquid `{{ ... }}` / `{% ... %}` unit, which cannot
- * contain comments) and record the gap in between. The scan skips comments,
- * treats quotes in code files and inside HTML/JSX tags as strings, and
- * leaves quotes in markup text content as literal text.
+ * become `value: "https://x.com/* bshopify-restore:... *\/"`). The marker is
+ * placed after the closing delimiter (or after a whole Liquid `{{ }}` /
+ * `{% %}` unit, which cannot contain comments) and the gap in between is
+ * recorded. Scans skip comments; only quotes in code files, inside HTML/JSX
+ * tags and inside Liquid/HTML quoted units are treated as strings.
  */
 
-export type InjectionSyntax = "code" | "markup";
+export type InjectionSyntax = "code" | "markup" | "toml";
 
-/** Markup files (html/liquid) need tag/text awareness; the rest scan as code. */
+/** html/liquid need tag/text awareness; toml scans with `#` comments. */
 export function getInjectionSyntax(path: string): InjectionSyntax {
   switch (extname(path).toLowerCase()) {
     case ".html":
     case ".htm":
     case ".liquid":
       return "markup";
+    case ".toml":
+      return "toml";
     default:
       return "code";
   }
@@ -49,11 +50,11 @@ export function findInjectionContext(
   if (syntax === "markup") {
     scanMarkup(content, strings, liquids);
   } else {
-    scanCodeRegion(content, 0, content.length, strings);
+    scanStrings(content, 0, content.length, strings, syntax === "toml");
   }
 
-  // Inside a Liquid unit the marker goes after the whole unit: comments are
-  // not allowed inside `{{ }}`/`{% %}`.
+  // Inside a Liquid unit the marker goes after the whole unit: comments
+  // are not allowed inside `{{ }}`/`{% %}`.
   for (const unit of liquids) {
     if (matchStart >= unit.start && matchStart < unit.end) {
       return { start: unit.start, end: unit.end, insertAt: unit.end };
@@ -95,11 +96,10 @@ function scanMarkup(
     } else if (ch === "{" && content.startsWith("{% comment %}", i)) {
       i = skipLiquidComment(content, i);
     } else if (ch === "{" && content.startsWith("{% schema %}", i)) {
-      // Schema blocks carry a JSON body; scan it as code so strings inside
-      // settings defaults are recognized.
+      // Schema JSON body: scan as code so string defaults are recognized.
       const endschema = content.indexOf("{% endschema %}", i);
       const bodyEnd = endschema === -1 ? n : endschema;
-      scanCodeRegion(content, i + "{% schema %}".length, bodyEnd, strings);
+      scanStrings(content, i + "{% schema %}".length, bodyEnd, strings);
       i = bodyEnd;
     } else if (content.startsWith("{{", i) || content.startsWith("{%", i)) {
       const end = findLiquidUnitEnd(content, i);
@@ -121,21 +121,27 @@ function scanMarkup(
   }
 }
 
-/** Records quoted-string ranges in a code region. */
-function scanCodeRegion(content: string, from: number, to: number, strings: StringRange[]): void {
+/** Records quoted strings, skipping comments (and `#` lines for toml). */
+function scanStrings(
+  content: string,
+  from: number,
+  to: number,
+  strings: StringRange[],
+  hashComments = false,
+): void {
   let i = from;
 
   while (i < to) {
     const ch = content[i];
 
-    if (ch === "/" && content[i + 1] === "/") {
+    if (hashComments && ch === "#") {
+      i = skipLine(content, i + 1);
+    } else if (ch === "/" && content[i + 1] === "/") {
       i = skipLine(content, i + 2);
     } else if (ch === "/" && content[i + 1] === "*") {
       i = skipBlock(content, i + 2);
     } else if (ch === '"' || ch === "'") {
       const end = findQuotedEnd(content, i, ch);
-      // Unterminated runs are broken code (or apostrophes in JSX text):
-      // never real string delimiters.
       if (end < content.length) {
         strings.push({ start: i, end });
       }

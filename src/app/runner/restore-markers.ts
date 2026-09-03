@@ -7,7 +7,8 @@ import { createValueChecksum, decodeBase64Url, restoreMarkerPrefix } from "#/uti
  *
  * Injected files contain `value` followed by a marker comment whose core is
  * `bshopify-restore:<b64url(pattern)>:<valueLength>:<gapLength>:<checksum>:<nonce>`,
- * wrapped in the file-type comment syntax (block, html, jsx, or liquid).
+ * wrapped in the file-type comment syntax (block, html, jsx, liquid, or the
+ * `#` line comment used by toml).
  * `gapLength` is zero when the marker sits flush after the value (plain code
  * position) and positive when the marker had to be moved outside a string
  * literal or Liquid unit, leaving the untouched source text between the
@@ -52,6 +53,9 @@ const markerFormats: MarkerFormat[] = [
       new RegExp(`<!-- ${markerCorePattern} -->`, "g"),
       new RegExp(`\\{/\\* ${markerCorePattern} \\*/\\}`, "g"),
       new RegExp(`\\{% comment %} ${markerCorePattern} \\{% endcomment %\\}`, "g"),
+      // toml hash comment: ` # bshopify-restore:<core>` (createFileMarker
+      // writes the leading space so the `#` always starts a comment).
+      new RegExp(` # ${markerCorePattern}`, "g"),
     ],
   },
   {
@@ -61,6 +65,7 @@ const markerFormats: MarkerFormat[] = [
       new RegExp(`<!-- ${legacyMarkerCorePattern} -->`, "g"),
       new RegExp(`\\{/\\* ${legacyMarkerCorePattern} \\*/\\}`, "g"),
       new RegExp(`\\{% comment %} ${legacyMarkerCorePattern} \\{% endcomment %\\}`, "g"),
+      new RegExp(` # ${legacyMarkerCorePattern}`, "g"),
     ],
   },
 ];

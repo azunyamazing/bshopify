@@ -218,7 +218,7 @@ bshopify app dev --config test
 
 如果配置路径是默认文件 `shopify.app.toml`，bshopify 会读取该文件，并执行不带 `--config` 的 Shopify CLI 命令，例如 `shopify app dev` 或 `shopify app deploy`。
 
-`dev` 默认会在注入值后追加按文件类型生成的 restore marker（自描述格式：占位符 + 注入值长度 + 注入值校验和 + 随机串，不包含注入值本身），结束后只恢复本轮注入的值。marker 同时是 Git clean filter 的还原依据，也是进程被杀后恢复的依据。校验和用于只信任真正由 bshopify 写入的 marker：文件里形似 marker 的普通文本、或 dev 期间被手改过的注入值都不会被错误还原。若遇到未覆盖的文件类型或注释语法不兼容，仍可在 `bshopify.config.mjs` 显式写 `restoreMarkers: false` 关闭（内部默认，向后兼容）：
+`dev` 默认会在注入值后追加按文件类型生成的 restore marker（自描述格式：占位符 + 注入值长度 + 注入值校验和 + 随机串，不包含注入值本身），结束后只恢复本轮注入的值。marker 会按目标文件类型选择注释语法（如 js/css 用 `/* */`、html 用 `<!-- -->`、liquid 用 `{% comment %}`，toml 用 `#` 行注释并放到行尾），因此注入到 `shopify.app*.toml`、`shopify.extension.toml` 等 TOML 文件时仍是合法 TOML，Shopify CLI 可正常解析。marker 同时是 Git clean filter 的还原依据，也是进程被杀后恢复的依据。校验和用于只信任真正由 bshopify 写入的 marker：文件里形似 marker 的普通文本、或 dev 期间被手改过的注入值都不会被错误还原。若遇到未覆盖的文件类型或注释语法不兼容，仍可在 `bshopify.config.mjs` 显式写 `restoreMarkers: false` 关闭（内部默认，向后兼容）：
 
 ```js
 export default {

@@ -90,6 +90,21 @@ describe("generated git clean filter script", () => {
     expect(result.stdout).toEqual(Buffer.from(source));
   });
 
+  it("restores injected toml content to placeholders", async () => {
+    const scriptPath = await writeCleanFilterScript();
+    const filePath = "shopify.app.dev.toml";
+    const source = 'application_url = "__SHOPIFY_APP_PROXY_BASE__"\n';
+    const injected = inject(source, filePath, "__SHOPIFY_APP_PROXY_BASE__", "https://proxy.example.com");
+
+    expect(injected).toContain(" # bshopify-restore:");
+
+    const result = await runCleanFilter(scriptPath, injected);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toEqual(Buffer.from(source));
+  });
+
   it("restores a string-context injection without corrupting the string value", async () => {
     const scriptPath = await writeCleanFilterScript();
     const filePath = "extensions/x/assets/app.js";
@@ -256,6 +271,31 @@ describe("generated script parity with the TS restore", () => {
     [
       "html attribute value",
       inject('<a href="__A__" class="x">go</a>\n', "extensions/x/b.html", "__A__", "https://example.com"),
+    ],
+    [
+      "toml string injection",
+      inject('application_url = "__A__"\n', "shopify.app.dev.toml", "__A__", "https://example.com"),
+    ],
+    [
+      "toml bare value injection",
+      inject("port = __A__\n", "shopify.app.toml", "__A__", "8080"),
+    ],
+    [
+      "toml with trailing user comment",
+      inject('name = "__A__" # keep me\n', "shopify.app.toml", "__A__", "prod"),
+    ],
+    [
+      "toml multi-line array element with trailing comma",
+      inject('scopes = [\n  "__A__",\n  "write_products",\n]\n', "shopify.app.toml", "__A__", "read_products"),
+    ],
+    [
+      "toml two placeholders in one string",
+      inject(
+        inject('scopes = ["__A__ and __B__"]\n', "shopify.app.toml", "__A__", "aaa"),
+        "shopify.app.toml",
+        "__B__",
+        "bbb",
+      ),
     ],
     [
       "markup text content with apostrophes",

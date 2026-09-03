@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parse } from "smol-toml";
 import {
   findRestoreMarkers,
   hasRestoreMarkers,
@@ -92,6 +93,13 @@ describe("restoreInjectedMarkers", () => {
       'const url = "__APP_URL__";\n',
       "__APP_URL__",
       "https://example.com",
+    ],
+    [
+      "toml hash comment syntax",
+      "extensions/x/shopify.extension.toml",
+      'name = "__SHOPIFY_APP_PROXY_BASE__"\n',
+      "__SHOPIFY_APP_PROXY_BASE__",
+      "https://proxy.example.com",
     ],
     [
       "unicode pattern and value",
@@ -203,6 +211,95 @@ describe("restoreInjectedMarkers", () => {
     expect(markers[0]?.pattern).toBe("__A__");
     expect(markers[1]?.pattern).toBe("__B__");
     expect(markers[0]!.fullStart).toBeLessThan(markers[1]!.fullStart);
+  });
+});
+
+describe("toml markers", () => {
+  it("keeps the marker as a # line comment so the file stays valid TOML", () => {
+    const filePath = "shopify.app.dev.toml";
+    const source = 'application_url = "__APP_URL__"\n';
+    const injected = inject(source, filePath, "__APP_URL__", "https://example.com");
+
+    // The marker must be a TOML comment, never a JS-style block comment.
+    expect(injected).toContain('application_url = "https://example.com" # bshopify-restore:');
+    expect(injected).not.toMatch(/\/\*|<!--|\{% comment %\}/);
+    expect(parse(injected)).toEqual({ application_url: "https://example.com" });
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("keeps bare (unquoted) value replacements valid TOML", () => {
+    const filePath = "shopify.app.toml";
+    const source = "port = __PORT__\n";
+    const injected = inject(source, filePath, "__PORT__", "8080");
+
+    expect(injected).toContain("port = 8080 # bshopify-restore:");
+    expect(parse(injected)).toEqual({ port: 8080 });
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("round-trips when a trailing user comment shares the line", () => {
+    const filePath = "shopify.app.toml";
+    const source = 'name = "__APP_NAME__" # keep me\n';
+    const injected = inject(source, filePath, "__APP_NAME__", "prod");
+
+    // The marker lands after the user comment, at the end of the line.
+    expect(injected).toContain('name = "prod" # keep me # bshopify-restore:');
+    expect(parse(injected)).toEqual({ name: "prod" });
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("keeps a string element of a multi-line array valid (trailing comma)", () => {
+    const filePath = "shopify.app.toml";
+    const source = 'scopes = [\n  "__A__",\n  "write_products",\n]\n';
+    const injected = inject(source, filePath, "__A__", "read_products");
+
+    // The `#` comment must come after the comma, never swallow it.
+    expect(injected).toContain('  "read_products", # bshopify-restore:');
+    expect(parse(injected)).toEqual({ scopes: ["read_products", "write_products"] });
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("keeps single-line arrays and inline tables valid when a bare value is replaced", () => {
+    const filePath = "shopify.app.toml";
+    const source = 'allowed = [__A__, 2]\nthreshold = { min = __B__ }\n';
+    const first = inject(source, filePath, "__A__", "1");
+    const injected = inject(first, filePath, "__B__", "0");
+
+    expect(injected).toContain("allowed = [1, 2] # bshopify-restore:");
+    expect(injected).toContain("threshold = { min = 0 } # bshopify-restore:");
+    expect(parse(injected)).toEqual({ allowed: [1, 2], threshold: { min: 0 } });
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("restores two placeholders inside one string on one line", () => {
+    const filePath = "shopify.app.toml";
+    const source = 'scopes = ["__A__ and __B__"]\n';
+    const first = inject(source, filePath, "__A__", "aaa");
+    const injected = inject(first, filePath, "__B__", "bbb");
+
+    expect(parse(injected)).toEqual({ scopes: ["aaa and bbb"] });
+    expect(restoreInjectedMarkers(injected)).toBe(source);
+  });
+
+  it("restores legacy toml markers written without a gap length", () => {
+    const filePath = "shopify.app.toml";
+    const source = 'name = "__APP_NAME__"\n';
+    // Old marker core: bshopify-restore:<b64(pattern)>:<valueLength>:<checksum>:<nonce>
+    const legacyMarker =
+      ` # ${restoreMarkerPrefix}:${encodeBase64Url("__APP_NAME__")}:3:${createValueChecksum("abc")}:00000000-0000-0000-0000-000000000000`;
+    const legacy = source.replace("__APP_NAME__", `abc${legacyMarker}`);
+
+    expect(restoreInjectedMarkers(legacy)).toBe(source);
+  });
+
+  it("restores a hash marker that shares its line with later content", () => {
+    const filePath = "shopify.app.toml";
+    const source = 'name = "__APP_NAME__" # keep me\n';
+    const injected = inject(source, filePath, "__APP_NAME__", "prod");
+    const markers = findRestoreMarkers(injected);
+
+    expect(markers).toHaveLength(1);
+    expect(markers[0]?.pattern).toBe("__APP_NAME__");
   });
 });
 

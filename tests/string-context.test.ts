@@ -12,10 +12,12 @@ function contextOf(content: string, pattern: string, path: string): InjectionCon
 }
 
 describe("getInjectionSyntax", () => {
-  it("treats html/liquid files as markup and everything else as code", () => {
+  it("treats html/liquid files as markup, toml as toml, and the rest as code", () => {
     expect(getInjectionSyntax("a/b.liquid")).toBe("markup");
     expect(getInjectionSyntax("a/b.html")).toBe("markup");
     expect(getInjectionSyntax("a/b.HTM")).toBe("markup");
+    expect(getInjectionSyntax("shopify.app.dev.toml")).toBe("toml");
+    expect(getInjectionSyntax("a/b.TOML")).toBe("toml");
     expect(getInjectionSyntax("a/b.js")).toBe("code");
     expect(getInjectionSyntax("a/b.tsx")).toBe("code");
     expect(getInjectionSyntax("a/b.css")).toBe("code");
@@ -58,6 +60,44 @@ describe("findInjectionContext (code)", () => {
   it("detects strings in jsx attributes but not plain expressions", () => {
     expect(contextOf('const el = <a href="__URL__">x</a>;\n', "__URL__", "App.tsx")).toBeDefined();
     expect(contextOf("const el = <a href={__URL__}>x</a>;\n", "__URL__", "App.tsx")).toBeUndefined();
+  });
+});
+
+describe("findInjectionContext (toml)", () => {
+  it("detects a placeholder inside a double-quoted string", () => {
+    const content = 'name = "__URL__"\n';
+    const context = contextOf(content, "__URL__", "shopify.app.toml");
+
+    expect(context).toBeDefined();
+    expect(content.slice(context!.start, context!.end)).toBe('"__URL__"');
+  });
+
+  it("detects a placeholder inside a single-quoted literal string", () => {
+    expect(contextOf("name = '__URL__'\n", "__URL__", "a.toml")).toBeDefined();
+  });
+
+  it("does not treat a # as a comment inside a string", () => {
+    const content = 'url = "https://x.com/#frag/__URL__"\n';
+    const context = contextOf(content, "__URL__", "a.toml");
+
+    expect(context).toBeDefined();
+    expect(content.slice(context!.start, context!.end)).toBe('"https://x.com/#frag/__URL__"');
+  });
+
+  it("does not treat quotes inside hash comments as strings", () => {
+    expect(contextOf('# name = "__URL__" (disabled)\n', "__URL__", "a.toml")).toBeUndefined();
+  });
+
+  it("skips hash comments so a later quoted placeholder is still detected", () => {
+    const content = '# note: keep "quotes" out of the scan\nname = "__URL__"\n';
+    const context = contextOf(content, "__URL__", "a.toml");
+
+    expect(context).toBeDefined();
+    expect(content.slice(context!.start, context!.end)).toBe('"__URL__"');
+  });
+
+  it("leaves unquoted bare values (no string context) alone", () => {
+    expect(contextOf("port = __URL__\n", "__URL__", "a.toml")).toBeUndefined();
   });
 });
 

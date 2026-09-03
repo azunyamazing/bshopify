@@ -72,12 +72,18 @@ export function createFileMarker(path: string, marker: string): string {
       return `<!-- ${marker} -->`;
     case "jsx":
       return `{/* ${marker} */}`;
+    case "toml":
+      // TOML has no block comments, so the marker is a `#` line comment. The
+      // leading space keeps the `#` legal right after a value or a closing
+      // string delimiter; the marker itself never contains a newline, so it
+      // always occupies exactly the rest of its own line.
+      return ` # ${marker}`;
     case "block":
       return `/* ${marker} */`;
   }
 }
 
-type MarkerSyntax = "block" | "html" | "jsx" | "liquid";
+type MarkerSyntax = "block" | "html" | "jsx" | "liquid" | "toml";
 
 function getMarkerSyntax(path: string): MarkerSyntax {
   switch (extname(path).toLowerCase()) {
@@ -86,6 +92,8 @@ function getMarkerSyntax(path: string): MarkerSyntax {
     case ".html":
     case ".htm":
       return "html";
+    case ".toml":
+      return "toml";
     case ".jsx":
     case ".tsx":
       return "jsx";
