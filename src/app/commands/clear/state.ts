@@ -3,6 +3,7 @@ import { access, readFile, readdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { cleanFilterScriptName } from "#/app/commands/init/constants";
 import { bshopifyStateDir } from "#/app/runner/constants";
+import { refreshGitIndexForRestoredFiles } from "#/app/runner/git-refresh";
 import { restoreFileTransactionJournal } from "#/app/runner/transaction";
 import { isNodeError } from "#/utils/node";
 import { formatPath } from "#/utils/paths";
@@ -37,9 +38,14 @@ export async function restorePendingTransaction(
   }
 
   try {
-    const restored = await restoreFileTransactionJournal(journalPath);
+    const restoredFiles = await restoreFileTransactionJournal(journalPath);
+
+    if (restoredFiles.length > 0) {
+      await refreshGitIndexForRestoredFiles(cwd, restoredFiles);
+    }
+
     result.updated.push(
-      restored
+      restoredFiles.length > 0
         ? "restored pending bshopify injections"
         : "cleaned stale bshopify transaction journal",
     );

@@ -25,6 +25,7 @@ import {
   formatInjectionWarnings,
 } from "#/app/runner/injections";
 import { acquireLock } from "#/app/runner/lock";
+import { refreshGitIndexForRestoredFiles } from "#/app/runner/git-refresh";
 import { runShopifyCommand as runDefaultShopifyCommand } from "#/app/runner/shopify";
 import {
   createFileTransaction,
@@ -60,9 +61,14 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
 
   try {
     if (lock.recoveredStaleLock) {
-      const restored = await restoreFileTransactionJournal(transactionPath);
+      const restoredFiles = await restoreFileTransactionJournal(transactionPath);
+
+      if (restoredFiles.length > 0) {
+        await refreshGitIndexForRestoredFiles(cwd, restoredFiles);
+      }
+
       console.warn(
-        restored
+        restoredFiles.length > 0
           ? "Detected a stale Shopify extension prepare lock. Restored previous injections and cleaned it automatically."
           : "Detected a stale Shopify extension prepare lock. Cleaned it automatically.",
       );
@@ -161,7 +167,9 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
       await runOnErrorHooks(context, plans, error);
       throw error;
     } finally {
-      await transaction.restore();
+      const restoredFiles = await transaction.restore();
+      await refreshGitIndexForRestoredFiles(cwd, restoredFiles);
+
       if (appliedInjections.length > 0) {
         console.log(formatRestoreNotice(dryRun));
       }

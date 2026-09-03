@@ -434,7 +434,7 @@ describe("transaction restore", () => {
     await writeJournalWithReplacements(journalPath, filePath, []);
     const restored = await restoreFileTransactionJournal(journalPath);
 
-    expect(restored).toBe(true);
+    expect(restored).toContain(filePath);
     await expect(readFile(filePath, "utf8")).resolves.toBe(source);
   });
 
@@ -472,7 +472,7 @@ describe("transaction restore", () => {
     ]);
     const restored = await restoreFileTransactionJournal(journalPath);
 
-    expect(restored).toBe(true);
+    expect(restored).toContain(filePath);
     await expect(readFile(filePath, "utf8")).resolves.toBe(source);
   });
 });

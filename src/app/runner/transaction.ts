@@ -13,11 +13,13 @@ export async function createFileTransaction(journalPath?: string): Promise<FileT
 
   return {
     async restore() {
-      await restoreTrackedFiles([...tracked.values()]);
+      const restored = await restoreTrackedFiles([...tracked.values()]);
 
       if (journalPath !== undefined) {
         await rm(journalPath, { force: true });
       }
+
+      return restored;
     },
     async writeFile(path, content, replacement) {
       const trackedFile = tracked.get(path) ?? { path, replacements: [] };
@@ -29,19 +31,26 @@ export async function createFileTransaction(journalPath?: string): Promise<FileT
   };
 }
 
-export async function restoreFileTransactionJournal(journalPath: string): Promise<boolean> {
+/**
+ * Restores the pending injections recorded in a transaction journal (a killed
+ * dev/deploy process) and returns the paths of the restored files. An empty
+ * result means there was no journal to restore.
+ */
+export async function restoreFileTransactionJournal(journalPath: string): Promise<string[]> {
   const journal = await readJournal(journalPath);
 
   if (journal === undefined) {
-    return false;
+    return [];
   }
 
-  await restoreTrackedFiles(journal.files);
+  const restored = await restoreTrackedFiles(journal.files);
   await rm(journalPath, { force: true });
-  return true;
+  return restored;
 }
 
-async function restoreTrackedFiles(files: TrackedFile[]): Promise<void> {
+async function restoreTrackedFiles(files: TrackedFile[]): Promise<string[]> {
+  const restored: string[] = [];
+
   for (const file of files.slice().reverse()) {
     let content = await readFile(file.path, "utf8");
 
@@ -63,7 +72,10 @@ async function restoreTrackedFiles(files: TrackedFile[]): Promise<void> {
     }
 
     await writeFile(file.path, content);
+    restored.push(file.path);
   }
+
+  return restored;
 }
 
 async function writeJournal(

@@ -72,7 +72,8 @@ export interface RunnerContextBase {
 }
 
 export interface FileTransaction {
-  restore(): Promise<void>;
+  /** Restores every tracked injection and returns the paths of the restored files. */
+  restore(): Promise<string[]>;
   writeFile(path: string, content: string, replacement: ReverseReplacement): Promise<void>;
 }
 
