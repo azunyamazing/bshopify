@@ -115,7 +115,7 @@ bshopify app init
 - `bshopify.config.mjs`
 - `.bshopify/` 的 `.gitignore` 忽略项
 - 当前 Git hooks 目录下的 `pre-commit`
-- `extensions/*/__entry.js`
+- `extensions/*/__entry.js`（自带 `// @ts-check` + JSDoc 类型引用，见 [Entry 类型提示](#entry-类型提示与占位跳过)）
 - `.bshopify/git-add-cleaner.js`（Git clean/smudge filter，位于被 ignore 的 `.bshopify/` 下，不随仓库提交）
 - `.gitattributes`（`extensions/** filter=bshopify`）
 - Git local config `filter.bshopify.*`（clean / smudge / required=false）
@@ -207,6 +207,27 @@ export default {
 ```
 
 关闭后仍会在 dev 结束时恢复占位符，但恢复会按注入值本身匹配，dev 期间手写的相同值也可能被一起还原；且文件不再携带 marker，Git clean filter 将无法在 `git add` 时还原注入文件。
+
+## Entry 类型提示与占位跳过
+
+`init` 生成的 `__entry.js` 是带类型的：文件顶部有 `// @ts-check`，并用 JSDoc 引用了包自带的类型：
+
+```js
+// @ts-check
+/** @type {import('@bestfulfill/bshopify').ExtensionLifecycle} */
+export default {
+  async prepare(ctx) {
+    return { injections: [ /* ... */ ] };
+  },
+  // validate / beforeDeploy / afterDeploy / onError 同享类型推导
+};
+```
+
+因此编辑器里 `ctx`（`ExtensionContext`，含 `configPath` / `env` / `appConfig`）、`plan`（`PreparedExtensionPlan`）、`result`（`ExtensionDeployResult`）等参数都有补全与错误提示。类型来自 `@bestfulfill/bshopify` 的公开导出（`ExtensionLifecycle` / `ExtensionContext` / `InjectionPlan` / `PreparedExtensionPlan` / `ExtensionDeployResult` 等）；后续模板升级时，`init --update` 会把 manifest 里记录的生成 entry 刷新到最新模板。
+
+当一个 `__entry.js` 仍是未改动过的生成模板（即占位 entry，没有任何 injections 或 hook 逻辑）时，`dev` / `deploy` 会**直接跳过它**：不加载模块、不执行 `prepare`、不注入、不在 deploy summary 中列出，只打印一行 `Skipped N placeholder extension entries ...`。只有真正编写了注入或 hook 的 entry 才会进入执行链路。这能避免多 extension 项目里大量空模板带来的无效 import 与输出噪声；若你改了模板（例如补一个 injection），它就不再是占位文件，会自动回到执行链路。
+
+`deploy` 不会隐藏任何 `__entry.js`：`__entry.js` 对 Shopify 只是扩展目录里的多余文件，多一个文件不会导致 deploy 失败或被拦截，因此 entry（含占位 entry）在 deploy 期间原样保留，只恢复本轮真正写过的注入目标文件。
 
 ## 项目结构
 

@@ -9,6 +9,7 @@ import { createRunnerContext } from "#/app/runner/context";
 import { printEnvFilesOutput } from "#/app/runner/env-files";
 import {
   findManagedEntries,
+  formatSkippedPlaceholderEntries,
   loadManagedEntryHooks,
   preparePlans,
   validatePlans,
@@ -58,7 +59,8 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
       entryFileName: config.entryFileName,
       extensionsRoot: config.extensionsRoot,
     });
-    const hooks = await loadManagedEntryHooks(entries);
+    const hooks = await loadManagedEntryHooks(entries, { skipPlaceholders: true });
+    printSkippedPlaceholderEntries(entries.length - hooks.length);
     const plans = await preparePlans(context, hooks);
     await validatePlans(context, plans);
 
@@ -113,6 +115,14 @@ export async function devProject(options: DevOptions = {}): Promise<number> {
     }
   } finally {
     await lock.release();
+  }
+}
+
+function printSkippedPlaceholderEntries(count: number): void {
+  const message = formatSkippedPlaceholderEntries(count);
+
+  if (message !== undefined) {
+    console.log(message);
   }
 }
 

@@ -34,6 +34,7 @@ import {
   runCli,
 } from "../src";
 import { findManagedEntries, loadManagedEntryHooks } from "../src/extension/entries";
+import { managedEntryTemplate } from "../src/extension/manage-content";
 import { defaultRunnerConfig } from "../src/app/runner/config";
 import type { RunnerContextBase } from "../src/app/runner/types";
 
@@ -1654,6 +1655,33 @@ describe("devProject", () => {
     );
     expect(runShopifyCommand).not.toHaveBeenCalled();
   });
+
+  it("skips placeholder entries during dev without loading or restoring them", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      managedEntryTemplate,
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid"),
+      "<div></div>\n",
+    );
+    const runShopifyCommand = vi.fn(async () => 0);
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let output = "";
+
+    try {
+      const exitCode = await devProject({ cwd, runShopifyCommand });
+      output = log.mock.calls.map(([message]) => String(message)).join("\n");
+      expect(exitCode).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "dev", "--config", "dev"]);
+    expect(output).toContain("Skipped 1 placeholder extension entr");
+    expect(output).not.toContain("Dev extension files restored.");
+  });
 });
 
 describe("deployProject", () => {
@@ -1940,7 +1968,7 @@ describe("deployProject", () => {
     expect(output).not.toContain("orders/create, orders/updated");
   });
 
-  it("injects deploy values, hides extension entries during Shopify deploy, and restores afterward", async () => {
+  it("injects deploy values while Shopify deploy runs and restores afterward", async () => {
     const cwd = await createDevProject();
     await writeFile(
       join(cwd, "shopify.app.test.toml"),
@@ -1961,7 +1989,8 @@ describe("deployProject", () => {
         "/apps/fixture-test",
       );
       await expect(readFile(targetPath, "utf8")).resolves.not.toContain("bshopify-restore:");
-      await expect(stat(entryPath)).rejects.toMatchObject({ code: "ENOENT" });
+      // entry files stay in place during deploy; Shopify ignores extra files
+      await expect(stat(entryPath)).resolves.toBeDefined();
       return 0;
     });
 
@@ -2046,7 +2075,7 @@ describe("deployProject", () => {
     );
   });
 
-  it("restores stale hidden deploy entries before preparing plans", async () => {
+  it("restores stale injected values from a killed deploy before preparing plans", async () => {
     const cwd = await createDevProject();
     await writeFile(
       join(cwd, "shopify.app.test.toml"),
@@ -2061,25 +2090,35 @@ describe("deployProject", () => {
       ].join("\n"),
     );
     const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
-    const entryPath = join(cwd, "extensions", "theme-extension", "__entry.js");
-    const hiddenPath = `${entryPath}.bshopify-hidden-stale`;
     const transactionPath = join(cwd, ".bshopify", "extension-prepare.transaction.json");
-    const entrySource = await readFile(entryPath, "utf8");
+    const staleValue = "https://stale.example.com/proxy";
+    // Simulate a deploy killed after injecting without markers (deploy style):
+    // the target still holds the stale value and the journal records it.
+    await writeFile(
+      targetPath,
+      '<div data-api-base="https://stale.example.com/proxy"></div>\n',
+    );
     await mkdir(join(cwd, ".bshopify"), { recursive: true });
     await writeFile(join(cwd, ".bshopify", "extension-prepare.lock"), "999999999\n");
-    await writeFile(hiddenPath, entrySource);
-    await rm(entryPath);
     await writeFile(
       transactionPath,
       `${JSON.stringify({
-        files: [],
-        hiddenFiles: [{ hiddenPath, path: entryPath }],
+        files: [
+          {
+            path: targetPath,
+            replacements: [
+              {
+                pattern: "__SHOPIFY_APP_PROXY_BASE__",
+                value: staleValue,
+              },
+            ],
+          },
+        ],
       })}\n`,
     );
     const runShopifyCommand = vi.fn(async () => {
-      await expect(readFile(targetPath, "utf8")).resolves.toContain(
-        "/apps/fixture-test",
-      );
+      await expect(readFile(targetPath, "utf8")).resolves.toContain("/apps/fixture-test");
+      await expect(readFile(targetPath, "utf8")).resolves.not.toContain(staleValue);
       return 0;
     });
 
@@ -2090,7 +2129,9 @@ describe("deployProject", () => {
       yes: true,
     });
 
-    await expect(readFile(entryPath, "utf8")).resolves.toBe(entrySource);
+    await expect(readFile(targetPath, "utf8")).resolves.toBe(
+      '<div data-api-base="__SHOPIFY_APP_PROXY_BASE__"></div>\n',
+    );
     await expect(readFile(transactionPath, "utf8")).rejects.toMatchObject({
       code: "ENOENT",
     });
@@ -2332,6 +2373,106 @@ describe("deployProject", () => {
     expect(warningOutput).toContain(
       'extensions/theme-extension/assets/productBlock.tsx: expected exactly one "__SHOPIFY_APP_PROXY_BASE__" match, got 0; skipped.',
     );
+  });
+
+  it("skips placeholder entries during deploy: not listed, entries stay in place, effective entries still injected", async () => {
+    const cwd = await createDevProject();
+    await mkdir(join(cwd, "extensions", "placeholder-ext", "blocks"), { recursive: true });
+    await writeFile(
+      join(cwd, "extensions", "placeholder-ext", "blocks", "app-embed.liquid"),
+      "<div></div>\n",
+    );
+    await writeFile(
+      join(cwd, "extensions", "placeholder-ext", "__entry.js"),
+      managedEntryTemplate,
+    );
+    await writeFile(
+      join(cwd, "shopify.app.test.toml"),
+      [
+        ...createShopifyBasicConfig("https://test.example.com"),
+        "",
+        "[app_proxy]",
+        'prefix = "apps"',
+        'subpath = "fixture-test"',
+        'url = "https://example.test/proxy"',
+        "",
+      ].join("\n"),
+    );
+    const customEntryPath = join(cwd, "extensions", "theme-extension", "__entry.js");
+    const placeholderEntryPath = join(cwd, "extensions", "placeholder-ext", "__entry.js");
+    const targetPath = join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let output = "";
+    const runShopifyCommand = vi.fn(async () => {
+      // no entry files are hidden anymore, placeholder or not
+      await expect(stat(customEntryPath)).resolves.toBeDefined();
+      await expect(stat(placeholderEntryPath)).resolves.toBeDefined();
+      // the effective entry still ran its injection while Shopify deploys
+      await expect(readFile(targetPath, "utf8")).resolves.toContain("/apps/fixture-test");
+      return 0;
+    });
+
+    try {
+      const exitCode = await deployProject({
+        configName: "test",
+        cwd,
+        runShopifyCommand,
+        yes: true,
+      });
+      output = log.mock.calls.map(([message]) => String(message)).join("\n");
+      expect(exitCode).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(output).toContain("Skipped 1 placeholder extension entr");
+    expect(output).toContain("theme-extension");
+    expect(output).not.toContain("placeholder-ext");
+    await expect(readFile(customEntryPath, "utf8")).resolves.toContain("async prepare(ctx)");
+    await expect(readFile(placeholderEntryPath, "utf8")).resolves.toBe(managedEntryTemplate);
+  });
+
+  it("skips all-placeholder projects entirely: no injections and no restore notice", async () => {
+    const cwd = await createDevProject();
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      managedEntryTemplate,
+    );
+    await writeFile(
+      join(cwd, "extensions", "theme-extension", "blocks", "app-embed.liquid"),
+      "<div></div>\n",
+    );
+    await writeFile(
+      join(cwd, "shopify.app.test.toml"),
+      [
+        ...createShopifyBasicConfig("https://test.example.com"),
+        "",
+      ].join("\n"),
+    );
+    const entryPath = join(cwd, "extensions", "theme-extension", "__entry.js");
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    let output = "";
+    const runShopifyCommand = vi.fn(async () => {
+      await expect(stat(entryPath)).resolves.toBeDefined();
+      return 0;
+    });
+
+    try {
+      const exitCode = await deployProject({
+        configName: "test",
+        cwd,
+        runShopifyCommand,
+        yes: true,
+      });
+      output = log.mock.calls.map(([message]) => String(message)).join("\n");
+      expect(exitCode).toBe(0);
+    } finally {
+      log.mockRestore();
+    }
+
+    expect(runShopifyCommand).toHaveBeenCalledWith(["app", "deploy", "--config", "test"]);
+    expect(output).toContain("Skipped 1 placeholder extension entr");
+    expect(output).not.toContain("Deploy extension files restored.");
   });
 });
 

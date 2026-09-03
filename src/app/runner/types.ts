@@ -72,7 +72,6 @@ export interface RunnerContextBase {
 }
 
 export interface FileTransaction {
-  hideFile(path: string): Promise<void>;
   restore(): Promise<void>;
   writeFile(path: string, content: string, replacement: ReverseReplacement): Promise<void>;
 }
@@ -86,9 +85,4 @@ export interface ReverseReplacement {
 export interface TrackedFile {
   path: string;
   replacements: ReverseReplacement[];
-}
-
-export interface HiddenFile {
-  hiddenPath: string;
-  path: string;
 }

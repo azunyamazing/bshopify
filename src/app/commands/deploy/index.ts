@@ -10,6 +10,7 @@ import { createRunnerContext } from "#/app/runner/context";
 import { printEnvFilesOutput } from "#/app/runner/env-files";
 import {
   findManagedEntries,
+  formatSkippedPlaceholderEntries,
   loadManagedEntryHooks,
   preparePlans,
   runAfterDeployHooks,
@@ -71,11 +72,12 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
       entryFileName: config.entryFileName,
       extensionsRoot: config.extensionsRoot,
     });
-    const hooks = await loadManagedEntryHooks(entries);
+    const hooks = await loadManagedEntryHooks(entries, { skipPlaceholders: true });
+    printSkippedPlaceholderEntries(entries.length - hooks.length);
     const plans = await preparePlans(context, hooks);
     await validatePlans(context, plans);
 
-    console.log(formatDeploySummary(context, entries, dryRun));
+    console.log(formatDeploySummary(context, plans.map((plan) => plan.entry), dryRun));
 
     await requireProductionConfirmation(configName, {
       confirmProduction: options.confirmProduction === true,
@@ -133,10 +135,10 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
       let exitCode = 0;
 
       if (!dryRun) {
-        for (const entry of entries) {
-          await transaction.hideFile(entry.filePath);
-        }
-
+        // `__entry.js` files are not hidden during deploy: they are harmless
+        // stray files to Shopify (extra files neither fail nor block a
+        // deploy), and the injected target files are restored by the
+        // transaction below.
         const runShopifyCommand = createShopifyDeployRunner(options.runShopifyCommand, cwd);
         console.log("");
         exitCode =
@@ -160,12 +162,20 @@ export async function deployProject(options: DeployOptions = {}): Promise<number
       throw error;
     } finally {
       await transaction.restore();
-      if (appliedInjections.length > 0 || entries.length > 0) {
+      if (appliedInjections.length > 0) {
         console.log(formatRestoreNotice(dryRun));
       }
     }
   } finally {
     await lock.release();
+  }
+}
+
+function printSkippedPlaceholderEntries(count: number): void {
+  const message = formatSkippedPlaceholderEntries(count);
+
+  if (message !== undefined) {
+    console.log(message);
   }
 }
 

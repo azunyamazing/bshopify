@@ -3,8 +3,10 @@ import { join } from "node:path";
 import type { RunnerContextBase } from "#/app/runner/types";
 import { isNodeError } from "#/utils/node";
 import { isRecord, toRequiredString } from "#/utils/objects";
+import { ansi, colorize } from "#/utils/output";
 import { toPosixPath } from "#/utils/paths";
 import { loadManagedEntryModule } from "./entry-loader";
+import { isGeneratedEntry } from "./manage-content";
 import type {
   ExtensionDeployResult,
   ExtensionLifecycle,
@@ -76,12 +78,27 @@ export async function findManagedEntries(
   );
 }
 
+export interface LoadManagedEntryHooksOptions {
+  /**
+   * Skip entries that are untouched generated placeholders (byte-identical to
+   * the managed entry template). Placeholders have no runtime effect, so they
+   * do not need to be imported or planned; dev / deploy enable this to only
+   * process entries that actually produce injections or hooks.
+   */
+  skipPlaceholders?: boolean;
+}
+
 export async function loadManagedEntryHooks(
   entries: ManagedEntry[],
+  options: LoadManagedEntryHooksOptions = {},
 ): Promise<PreparedExtensionPlan[]> {
   const hooks: PreparedExtensionPlan[] = [];
 
   for (const entry of entries) {
+    if (options.skipPlaceholders === true && await isGeneratedEntry(entry.filePath)) {
+      continue;
+    }
+
     const module = await loadManagedEntryModule(entry.filePath);
     const lifecycle = module.default;
 
@@ -100,6 +117,22 @@ export async function loadManagedEntryHooks(
   }
 
   return hooks;
+}
+
+/**
+ * Formats a muted one-line notice for placeholder entries skipped by
+ * `loadManagedEntryHooks({ skipPlaceholders })`. Returns `undefined` when
+ * nothing was skipped, so callers can silently omit the line.
+ */
+export function formatSkippedPlaceholderEntries(count: number): string | undefined {
+  if (count <= 0) {
+    return undefined;
+  }
+
+  return colorize(
+    `Skipped ${count} placeholder extension entr${count === 1 ? "y" : "ies"} (untouched generated template, no runtime effect).`,
+    ansi.gray,
+  );
 }
 
 export async function preparePlans(

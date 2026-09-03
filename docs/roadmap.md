@@ -25,6 +25,7 @@
 | `app deploy` | `app deploy` | 注入、占位符校验、确认流程、`--dry-run`、before/after/onError 钩子 |
 | `app guard` | — | **仅命令占位（no-op）**，pre-commit hook 已写入但本体逻辑未实现 |
 | Runner 架构 | — | app 域 context/injections/lock/transaction + extension 域 entries/entry-loader/manage/manage-stale/manage-content/context/paths 已模块化 |
+| entry 类型提示 / 占位跳过 | `app dev`/`app deploy` | `__entry.js` 模板内置 `@ts-check` + JSDoc 引用包公开类型；dev/deploy 跳过未改动的占位模板 entry（不加载、不注入、不列 summary）；deploy 不再隐藏 entry（Shopify 不因多余文件失败） |
 
 **主要缺口**：guard 无真实逻辑；无 validate/restore/status 命令面；dev 不支持 watch；无 CI/发布流水线；无 env 管理；theme 域纯透传。
 

@@ -9,3 +9,18 @@ export type { PackageInfo } from "./utils/package-json";
 export type { DeployOptions } from "./app/runner/types";
 export type { DevOptions } from "./app/runner/types";
 export type { InitCheck, InitOptions, InitResult } from "./app/commands/init/types";
+
+// Extension entry lifecycle types: what `__entry.js` authors need to type
+// their prepare / validate / beforeDeploy / afterDeploy / onError hooks.
+// The generated entry template references these via JSDoc:
+// `@type {import('@bestfulfill/bshopify').ExtensionLifecycle}`.
+export type {
+  ExtensionContext,
+  ExtensionDeployResult,
+  ExtensionInfo,
+  ExtensionLifecycle,
+  ExtensionPlanResult,
+  InjectionPlan,
+  ManagedEntry,
+  PreparedExtensionPlan,
+} from "./extension/types";

@@ -395,7 +395,6 @@ async function writeJournalWithReplacements(
             replacements,
           },
         ],
-        hiddenFiles: [],
       },
       undefined,
       2,
