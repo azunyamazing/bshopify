@@ -1,149 +1,152 @@
-# bshopify
+# @standhigher/bshopify
 
-`@standhigher/bshopify` 是 BestFulfill 团队的 Shopify App Runner CLI。它用于统一接管团队项目中的 `shopify app xx` 入口，并在真实 Shopify CLI 执行前后编排 Extension Entry、配置注入、恢复、校验和提交防护。
+> BestFulfill Shopify App Runner CLI · a unified entrypoint for `shopify app xx`, orchestrating injection, restoration, validation, and commit protection around the real Shopify CLI
 
-当前仓库处于 TypeScript CLI MVP 阶段：包名、bin、构建链路、测试链路和基础命令面已经接入，`app init` 已实现项目初始化。CLI 会优先接管 bshopify 已实现的命令；未接管的命令会按原参数降级执行本机 `shopify` CLI。
+**English** | [中文](./README.zh-CN.md)
 
-## 环境要求
+## Introduction
+
+`@standhigher/bshopify` is the Shopify App Runner CLI built by the BestFulfill team. It standardizes the `shopify app xx` entrypoint across team projects, orchestrating Extension Entry lifecycle, config injection, runtime restoration, validation, and commit protection around the real Shopify CLI — so multi-environment config injection and secret safety become reusable engineering, not per-project shell scripts.
+
+Owned command surface today: `app init` (project bootstrap), `app dev` (development injection), `app deploy` (deployment injection), `app guard` (commit protection), and `app clear` (rollback). Commands bshopify does not own fall through to your local `shopify` CLI with the original arguments, so existing workflows keep working.
+
+## Highlights
+
+- **One-command bootstrap**: `bshopify app init` generates the config file, Extension Entries, and Git hooks / filters. Idempotent and safe to re-run.
+- **Per-environment config injection**: during `dev` / `deploy`, bshopify temporarily injects real values into target files according to `bshopify.config.mjs` and restores placeholders when the command finishes.
+- **Secrets never land in Git**: a Git clean filter plus a pre-commit guard provide a double safety net — injected values or held locks cannot be committed.
+- **Fallback compatible**: commands bshopify does not own are passed through to the Shopify CLI untouched; taking over a new command only adds behavior.
+
+## Requirements
 
 - Node.js >= 22.12.0
 - npm
-- Shopify CLI，未接管命令会通过 `execa` 优先使用项目本地 `node_modules/.bin/shopify`，找不到时再使用用户 PATH 中的 `shopify`
+- Shopify CLI: owned commands invoke it via `execa`, preferring the project-local `node_modules/.bin/shopify` and falling back to `shopify` on your PATH
 
-## 本地开发
+## Install
 
-安装依赖：
-
-```bash
-npm install
-```
-
-常用命令：
+Install as a local dependency inside a Shopify app project (recommended), or globally:
 
 ```bash
-npm run dev -- --help
-npm run typecheck
-npm run test
-npm run build
-npm run check
+# Inside the project (recommended; a devDependency is enough)
+npm install -D @standhigher/bshopify
+
+# Or globally
+npm install -g @standhigher/bshopify
 ```
 
-本地 link 调试：
+## Quick start
 
-```bash
-# 在 bshopify 仓库中构建并注册全局 link
-npm run build
-npm link
-
-# 在目标 Shopify app 项目中使用本地包
-npm link @standhigher/bshopify
-bshopify app init --check
-```
-
-取消本地 link：
-
-```bash
-# 在目标 Shopify app 项目中取消引用本地包
-npm unlink @standhigher/bshopify
-
-# 在 bshopify 仓库中取消全局 link
-npm unlink -g @standhigher/bshopify
-```
-
-## CLI 命令
-
-构建后可运行：
-
-```bash
-node dist/cli.js --help
-```
-
-当前已接管的 MVP 命令面：
-
-| 命令 | 目标用途 |
-|-|-|
-| `bshopify app init` | 初始化项目接入文件、配置、Git hook 和 Extension Entry |
-| `bshopify app dev` | 临时注入 Extension Entry 产物，按配置文件路径推导 Shopify config 名并执行 `shopify app dev --config <name>`，结束后恢复占位符 |
-| `bshopify app guard` | 阻止真实注入值或持锁状态进入提交 |
-| `bshopify app clear` | 删除当前 app 项目里 bshopify 生成的全部文件（`.bshopify/`、`bshopify.config.mjs`、生成的 entry 等），并还原 Git hook / filter / ignore 接入 |
-
-未被 bshopify 接管的命令会降级到 Shopify CLI，例如：
-
-```bash
-bshopify app deploy
-bshopify theme dev
-```
-
-以上命令会分别执行对应的 `shopify app deploy`、`shopify theme dev`。后续当 bshopify 接管某个命令时，会在保持 Shopify 命令格式的基础上增加注入、校验、恢复等编排。
-
-## init 命令
-
-在 Shopify app 项目根目录执行：
+Run the bootstrap from the root of a Shopify app project:
 
 ```bash
 bshopify app init
 ```
 
-`init` 会执行项目结构检查，并在缺失时生成以下内容：
+`init` checks the project and generates whatever is missing:
 
-- `bshopify.config.mjs`
-- `.bshopify/` 的 `.gitignore` 忽略项
-- 当前 Git hooks 目录下的 `pre-commit`
-- `extensions/*/__entry.js`（自带 `// @ts-check` + JSDoc 类型引用，见 [Entry 类型提示](#entry-类型提示与占位跳过)）
-- `.bshopify/git-add-cleaner.js`（Git clean/smudge filter，位于被 ignore 的 `.bshopify/` 下，不随仓库提交）
-- `.gitattributes`（`extensions/** filter=bshopify`）
-- Git local config `filter.bshopify.*`（clean / smudge / required=false）
+- `bshopify.config.mjs` — runner config (only the fields your team needs, with type hints)
+- `.gitignore` — appends a `# bshopify cli` block and `.bshopify/`
+- `pre-commit` in your Git hooks directory (a marked `bshopify app guard` block)
+- `extensions/*/__entry.js` — extension lifecycle entrypoints (with `// @ts-check` and JSDoc type references)
+- `.bshopify/git-add-cleaner.js` + `.gitattributes` + Git local config `filter.bshopify.*` — clean/smudge filter (the script lives under the ignored `.bshopify/`, so it is not committed)
 
-`init` 不会改写 `package.json`：`dev`、`deploy` 等 scripts 由你自己决定，想用 bshopify 时在 `package.json` 里配 `"dev": "bshopify app dev"` 即可。
+`init` **never rewrites `package.json`**; scripts are yours to maintain. Wire it up:
 
-`configFiles` 指向的 Shopify app TOML 文件缺失时，`init` 不再直接停止。刚起步的项目没有分环境配置，因此**所有环境共享同一个配置文件**：如果项目里已存在任意 `shopify.app*.toml`（含配置中已存在的），直接复用该文件并让 `configFiles` 的各环境都指向它，不触发生成；如果项目里一个 TOML 都没有，则只调用一次 `shopify app config link` 生成默认 `shopify.app.toml`，并让 `configFiles` 的 dev / test / production 都指向它。生成成功会记入 created 摘要并继续后续流程，生成失败则仍按缺失文件报错。`--check` 只做只读检查，不会触发生成。
-
-Git clean filter：dev 运行期间扩展文件里的占位符被临时替换成真实值，此时执行 `git add` 会先经过 `git-add-cleaner.js` 把注入值还原成占位符再进暂存区，避免真实 URL/密钥被提交。filter 命令写在本地 `.git/config`（由 `init` 写入），脚本存放在被 ignore 的 `.bshopify/` 下——新 clone 必须跑过 `init` filter 才会生效。脚本头部带 bshopify 生成标记：重跑 `init` 时，可识别为 bshopify 生成的旧版脚本会被直接替换为最新模板（脚本必须与当前注入 marker 格式同步，见下），不含该标记的自定义脚本保留不动。无注入 marker 的文件（含二进制）原样透传；`required` 默认为 `false`，未配置 filter 的机器会静默按原样暂存。`init` 不会对已跟踪文件做任何改写：首次接入时 bshopify 尚未注入过任何值，用户自己的改动保持原样。
-
-Git hook 写入规则：如果当前项目配置了 `core.hooksPath`，会写入该目录；否则写入 Git 默认的 `.git/hooks/pre-commit`。如果 `pre-commit` 已存在，`init` 会在 shebang 后插入带标记的 `bshopify app guard` block，不会覆盖原有 hook 内容。hook 执行时会优先使用项目本地 `./node_modules/.bin/bshopify`，不存在时再回退到 PATH 中的 `bshopify`。
-
-命令执行结束后会输出彩色 summary，用不同颜色区分检查结果、创建、更新、跳过、警告和错误。
-
-只检查不写文件：
-
-```bash
-bshopify app init --check
+```json
+{
+  "scripts": {
+    "dev": "bshopify app dev",
+    "deploy": "bshopify app deploy"
+  }
+}
 ```
 
-重复执行 `init` 是幂等的：补齐缺失的受管文件并刷新 manifest。对已存在的内容只做安全增量——pre-commit guard block 会刷新到当前模板，带生成标记的旧版 clean filter 脚本会被替换为最新模板，`.gitattributes` / git config 确保 bshopify 相关配置为当前值，`.gitignore` / `bshopify.config.mjs` 只补缺失项——已存在的 entry 文件不会被覆盖。
-
-**升级 bshopify**：CLI 不提供 `--update` 这类自动迁移命令（与 Vite 等构建工具的做法一致）。升级到新版本后，`init` 会在下次执行时自动刷新两类受管内容——guard block 与带生成标记的旧版 clean filter 脚本；其余受管文件（生成的 entry 模板、manifest 坐标变更等）不会自动迁移，请查阅包的 CHANGELOG 与迁移指南按说明处理，必要时删除旧生成文件后重新执行 `bshopify app init`，或手工应用新模板。
-
-`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录受管 entry 路径、Git hook 路径和 clean filter 脚本路径。已有的 `bshopify.config.mjs` 不会被覆盖（缺字段时只做合并）；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`。`package.json` 不在受管范围内，scripts 由你自行维护。
-
-对指定目录执行初始化：
+Then develop as usual:
 
 ```bash
+npm run dev
+```
+
+During `dev`, Git restores injected values to placeholders before staging, so real URLs / secrets never reach a commit.
+
+## CLI commands
+
+### Overview
+
+| Command | Purpose | Notes |
+|-|-|-|
+| `bshopify app init` | Bootstrap bshopify into the project | `--check` is read-only; `--cwd <path>` targets a directory; idempotent |
+| `bshopify app dev` | Inject extension config, then run `shopify app dev` | `--config <key>` selects a `configFiles` environment |
+| `bshopify app deploy` | Inject extension config, then run `shopify app deploy` | `--config`, `--dry-run`, `--yes`, `--confirm-production` |
+| `bshopify app guard` | Block real injected values or held locks from being committed | Invoked automatically by the pre-commit hook |
+| `bshopify app clear` | Remove everything bshopify generated; restore the pre-bootstrap state | `--yes` skips confirmation; never deletes your code |
+| Any other command | Falls through to the local Shopify CLI | e.g. `bshopify theme dev` → `shopify theme dev` |
+
+### Fallback behavior
+
+Commands bshopify does not own (e.g. the `theme` domain, or `app` subcommands not yet taken over) are executed against the Shopify CLI with the original arguments. When bshopify takes over a command later, it layers injection, validation, and restoration on top of the existing Shopify command format.
+
+### app init
+
+```bash
+bshopify app init              # bootstrap in the project root
+bshopify app init --check      # read-only check, writes nothing
 bshopify app init --cwd ./path/to/shopify-app
 ```
 
-## clear 命令
+Behavior notes:
 
-`clear` 与 `init` 相反：把当前 app 项目恢复到接入 bshopify 之前的状态，删除 bshopify 生成的全部文件并还原其修改过的文件。**不会删除你自己的代码**：
+- **Idempotent**: re-running only fills in missing managed files and refreshes the manifest. Existing content gets safe incremental updates — the pre-commit guard block is refreshed to the current template, and clean filter scripts carrying the generated marker are replaced with the latest template; **generated entries are never overwritten**, so your custom logic survives.
+- **Missing TOML does not abort**: when a TOML targeted by `configFiles` is missing, any existing `shopify.app*.toml` is reused for every environment; if none exists, `shopify app config link` is invoked once to create a default `shopify.app.toml`, and dev / test / production all point at it. `--check` is read-only and never triggers generation.
+- **Upgrading bshopify**: there is no automatic migration command. After an upgrade, re-running `init` refreshes the guard block and older clean filter scripts automatically; other managed files (entry templates, manifest coordinates, etc.) do not auto-migrate — follow the CHANGELOG / migration guide, and when needed delete the old generated files and re-run `init`.
+
+### app dev
 
 ```bash
-bshopify app clear
+bshopify app dev                 # uses configFiles.dev by default
+bshopify app dev --config test   # switch to the test environment
 ```
 
-执行后删除/还原以下内容：
+By default bshopify injects into the TOML that `configFiles.dev` points at and runs `shopify app dev`. With `--config <key>`, it reads the TOML for that key and derives the config name passed to the Shopify CLI from the file name — e.g. `configFiles.test = "shopify.app.preview.toml"` runs `shopify app dev --config preview`; when the path is the default `shopify.app.toml`, no `--config` is passed.
 
-- `.bshopify/` 状态目录（manifest、`git-add-cleaner.js`、dev/deploy 的 lock 与 transaction journal 等运行时文件）；
-- `bshopify.config.mjs` runner 配置；
-- manifest 中记录的、仍是生成模板内容的 extension entry（`__entry.js` 等）——**改写过自定义逻辑的 entry 会保留**，只给出提示；
-- `.gitignore` / `.gitattributes` 里 `init` 追加的 `# bshopify cli` 块；
-- pre-commit hook 里的 bshopify guard block（hook 本身是 bshopify 生成的模板时整文件删除，含用户内容的只去掉 guard block）；
-- 本地 git config 的 `filter.bshopify.*`（值被改过的话保留并提示）。
+`dev` only restores the values injected in the current run. If the process is killed, the next run detects the stale lock and restores from the leftover journal automatically — injected values never stay in your working tree.
 
-若 `bshopify app dev` / `app deploy` 正在运行（prepare 锁被活跃进程持有），`clear` 会直接拒绝执行并提示先停止该进程，避免破坏运行中的注入会话；若存在崩溃遗留的未恢复注入事务（如 dev 被 kill 留下的 journal），`clear` 会先按 journal 还原注入值再删除状态目录。命令默认交互确认，`--yes` 跳过确认；可用 `--cwd <path>` 指定项目目录。
+### app deploy
 
-## 配置
+```bash
+bshopify app deploy                       # pick a deploy environment from configFiles interactively
+bshopify app deploy --config production   # deploy production directly
+bshopify app deploy --config production --dry-run   # prepare and validate injections without calling the Shopify CLI
+bshopify app deploy --confirm-production  # non-interactive production deploy (CI)
+bshopify app deploy --yes                 # skip the final deploy confirmation (production still needs --confirm-production)
+```
 
-项目接入后由 `init` 生成 `bshopify.config.mjs`,按 app / extension 两段组织,只暴露团队需要关心的字段。生成的文件自带类型提示:首行 `// @ts-check`,并用 JSDoc 把默认导出标注成包的 `RunnerConfigInput` 类型,所以编辑 `configFiles` / `envFiles` 等字段时有补全和错误提示:
+`deploy` shares the injection pipeline with `dev`: it picks a TOML from `configFiles`, injects real values, validates that all placeholders resolved, then calls the Shopify CLI; afterwards it restores the injections and releases the lock. Without `--config`, it asks you to pick an environment interactively (`configFiles` must define at least one target). Selecting `production` requires typing `confirm`; `--confirm-production` or `--dry-run` bypass that check (`--yes` does not). `--dry-run` is meant for CI / preflight and never triggers a real deploy.
+
+### app guard
+
+Usually invoked automatically by the pre-commit hook; can also be run manually:
+
+```bash
+bshopify app guard
+```
+
+guard refuses the commit when staged content still contains unrestored real injected values, or when the dev / deploy prepare lock is still held (an injection session is running). It passes silently when there is no risk.
+
+### app clear
+
+```bash
+bshopify app clear        # restore after interactive confirmation
+bshopify app clear --yes  # skip confirmation
+bshopify app clear --cwd ./path/to/shopify-app
+```
+
+`clear` is the inverse of `init`: it deletes everything bshopify generated and reverts the files it modified — `.bshopify/`, `bshopify.config.mjs`, entries that are still generated templates, the `# bshopify cli` blocks appended to `.gitignore` / `.gitattributes`, the guard block in pre-commit, and the local `filter.bshopify.*` git config. **It never deletes your code**: entries you customized are kept and reported; if `dev` / `deploy` is running (lock held) it refuses to proceed.
+
+## Configuring `bshopify.config.mjs`
+
+Generated by `init`, organized into app / extension sections. The generated file ships with type hints: a leading `// @ts-check` plus a JSDoc annotation typing the default export as the package's `RunnerConfigInput`, so editing fields gives autocomplete and error reporting:
 
 ```js
 // @ts-check
@@ -171,17 +174,15 @@ export default {
 };
 ```
 
-- `configFiles`(app 级):环境名到项目根目录 Shopify app TOML 的映射,`bshopify app dev/deploy --config <name>` 按此选择。
-- `envFiles`(extension 级,可选):自定义注入 env 的命名空间映射,key → 一个或多个相对项目根目录的 JSON/TOML 文件路径。每个 key 会成为注入给 `__entry` 的 ctx 上的独立字段(如配置 `aEnv` → `ctx.aEnv`),多个文件内容按顺序浅合并,后面的文件覆盖前面的同名 key;文件内容必须是 JSON/TOML 对象。key 必须是合法 JS 标识符,且不能与 `configPath`/`env`/`appConfig` 冲突;路径必须位于项目根目录内(不支持绝对路径或 `../` 逃逸)。dev/deploy 开始时会在终端输出一行"Custom env files injected"提示,列出每个 key 实际加载的文件(全部缺失的 key 显示 `(none)`);某个文件缺失只打印 warning 并跳过,对应 key 保留其余文件合并结果(全部缺失时为 `{}`),不会中断命令;`envFiles` 本身不是对象时也只会 warning 并按空对象处理。格式不支持、解析失败或内容不是对象仍会直接报错。
-- `failOnUnresolvedPlaceholders`(extension 级):注入后若目标文件残留模板占位符则报错的行为开关。
+### Field reference
 
-`extensionsRoot`、`entryFileName`、`restoreMarkers` 是内部默认(分别为 `extensions`、`__entry.js`、`true`),新项目不再写入配置文件;已有配置仍可覆盖,用于向后兼容。`init` 对已存在的配置只做缺字段合并:只补齐 `configFiles`、`failOnUnresolvedPlaceholders`,不会覆盖用户已有的同名字段(包括 `envFiles`)。
+- **`configFiles`** (app level): maps an environment name to a root-level Shopify app TOML. `--config <name>` on `dev` / `deploy` selects by this key. File names must follow Shopify CLI naming rules (`shopify.app.toml` or `shopify.app.<name>.toml`).
+- **`envFiles`** (extension level, optional): namespaces for custom env injection — key → one or more JSON/TOML files relative to the project root. Each key becomes an independent field on the ctx injected into `__entry` (e.g. `aEnv` → `ctx.aEnv`); multiple files are shallow-merged in order, later files overriding same-name keys; file contents must be JSON/TOML objects. Keys must be valid JS identifiers and must not collide with `configPath` / `env` / `appConfig`; paths must stay inside the project root (no absolute paths or `../` escapes). A missing file only warns and is skipped without aborting; unsupported formats, parse failures, or non-object contents error out.
+- **`failOnUnresolvedPlaceholders`** (extension level): whether to fail when template placeholders remain in target files after injection.
 
-### 配置类型提示
+`extensionsRoot`, `entryFileName`, and `restoreMarkers` are internal defaults (`extensions`, `__entry.js`, `true`) and are no longer written into new config files; existing configs may still override them for backward compatibility. `init` only merges missing fields into an existing config (fills in `configFiles` and `failOnUnresolvedPlaceholders`) and never overrides user fields, including `envFiles`.
 
-和生成的 `__entry.js` 一样,`bshopify.config.mjs` 的类型也来自包本身:文件里的 `// @ts-check` 配合 JSDoc `@type {import('@standhigher/bshopify').RunnerConfigInput}` 让编辑器对 `configFiles` / `envFiles` / `failOnUnresolvedPlaceholders` 等字段给出补全与错误提示(`RunnerConfigInput` 是包对外导出的公开类型,所有字段可选,缺省走运行时默认值)。旧版本生成的、不带注解的配置文件不需要改写,CLI 读取不受影响。
-
-偏好 Vite 风格时,也可以显式用 `defineConfig` 包裹默认导出(包对外导出的 identity 帮助函数,只为类型检查与提示):
+Prefer a Vite-style config? Wrap the default export with `defineConfig` (an identity helper exported by the package, purely for type checking and hints):
 
 ```js
 // @ts-check
@@ -192,41 +193,11 @@ export default defineConfig({
 });
 ```
 
-注意 `defineConfig` 写法要求项目里能 `import` 到 `@standhigher/bshopify`(本地安装或 link 的包);若 bshopify 只装在全局、项目未安装该包,配置加载的动态 import 会失败,此时请用上面的 JSDoc 形式。两种写法 CLI 都能正常读取,`init` 也能自动合并缺字段;JSDoc 形式没有运行时依赖,是 `init` 生成的默认模板。
+> Note: the `defineConfig` form requires the project to be able to `import` `@standhigher/bshopify`; if the package is only installed globally, config loading fails — use the JSDoc form above instead (the default template `init` generates, with no runtime dependency).
 
-## dev 命令
+## Writing an Extension Entry (`__entry.js`)
 
-默认使用 `shopify.app.dev.toml` 生成注入上下文，并执行 `shopify app dev --config dev`：
-
-```bash
-bshopify app dev
-```
-
-切换 Shopify app config 时，通过 bshopify 自己的 `--config` 参数选择 `bshopify.config.mjs` 里的 `configFiles` key。bshopify 会读取该 key 对应的 TOML 路径，并从文件名推导最终传给 Shopify CLI 的 config 名，所以注入上下文、summary 和最终 Shopify CLI 参数会保持一致：
-
-```bash
-bshopify app dev --config test
-```
-
-`configFiles` 必须指向项目根目录下符合 Shopify CLI 命名规则的文件，例如 `shopify.app.toml` 或 `shopify.app.preview.toml`。例如 `configFiles.test = "shopify.app.preview.toml"` 时，bshopify 会读取 `shopify.app.preview.toml`，并执行 `shopify app dev --config preview` 或 `shopify app deploy --config preview`。
-
-如果配置路径是默认文件 `shopify.app.toml`，bshopify 会读取该文件，并执行不带 `--config` 的 Shopify CLI 命令，例如 `shopify app dev` 或 `shopify app deploy`。
-
-`dev` 默认会在注入值后追加按文件类型生成的 restore marker（自描述格式：占位符 + 注入值长度 + 注入值校验和 + 随机串，不包含注入值本身），结束后只恢复本轮注入的值。marker 会按目标文件类型选择注释语法（如 js/css 用 `/* */`、html 用 `<!-- -->`、liquid 用 `{% comment %}`，toml 用 `#` 行注释并放到行尾），因此注入到 `shopify.app*.toml`、`shopify.extension.toml` 等 TOML 文件时仍是合法 TOML，Shopify CLI 可正常解析。marker 同时是 Git clean filter 的还原依据，也是进程被杀后恢复的依据。校验和用于只信任真正由 bshopify 写入的 marker：文件里形似 marker 的普通文本、或 dev 期间被手改过的注入值都不会被错误还原。若遇到未覆盖的文件类型或注释语法不兼容，仍可在 `bshopify.config.mjs` 显式写 `restoreMarkers: false` 关闭（内部默认，向后兼容）：
-
-```js
-// @ts-check
-/** @type {import('@standhigher/bshopify').RunnerConfigInput} */
-export default {
-  restoreMarkers: false,
-};
-```
-
-关闭后仍会在 dev 结束时恢复占位符，但恢复会按注入值本身匹配，dev 期间手写的相同值也可能被一起还原；且文件不再携带 marker，Git clean filter 将无法在 `git add` 时还原注入文件。
-
-## Entry 类型提示与占位跳过
-
-`init` 生成的 `__entry.js` 是带类型的：文件顶部有 `// @ts-check`，并用 JSDoc 引用了包自带的类型：
+The `extensions/*/__entry.js` generated by `init` is the extension lifecycle entrypoint, typed out of the box:
 
 ```js
 // @ts-check
@@ -235,56 +206,51 @@ export default {
   async prepare(ctx) {
     return { injections: [ /* ... */ ] };
   },
-  // validate / beforeDeploy / afterDeploy / onError 同享类型推导
+  // validate / beforeDeploy / afterDeploy / onError share the same type inference
 };
 ```
 
-因此编辑器里 `ctx`（`ExtensionContext`，含 `configPath` / `env` / `appConfig`）、`plan`（`PreparedExtensionPlan`）、`result`（`ExtensionDeployResult`）等参数都有补全与错误提示。类型来自 `@standhigher/bshopify` 的公开导出（`ExtensionLifecycle` / `ExtensionContext` / `InjectionPlan` / `PreparedExtensionPlan` / `ExtensionDeployResult` 等）；模板随版本升级时不会自动刷新已生成的 entry，按发布说明（CHANGELOG / 迁移指南）处理，必要时删除受管 entry 后重新执行 `init` 让其按新模板重建。
+`ctx` (`ExtensionContext`, including `configPath` / `env` / `appConfig`), `plan` (`PreparedExtensionPlan`), `result` (`ExtensionDeployResult`) etc. all get autocomplete and error reporting in the editor. Types come from the package's public exports: `ExtensionLifecycle` / `ExtensionContext` / `InjectionPlan` / `PreparedExtensionPlan` / `ExtensionDeployResult`, and more.
 
-当一个 `__entry.js` 仍是未改动过的生成模板（即占位 entry，没有任何 injections 或 hook 逻辑）时，`dev` / `deploy` 会**直接跳过它**：不加载模块、不执行 `prepare`、不注入、不在 deploy summary 中列出，只打印一行 `Skipped N placeholder extension entries ...`。只有真正编写了注入或 hook 的 entry 才会进入执行链路。这能避免多 extension 项目里大量空模板带来的无效 import 与输出噪声；若你改了模板（例如补一个 injection），它就不再是占位文件，会自动回到执行链路。
+**Placeholder entries are skipped automatically**: when an `__entry.js` is still the untouched generated template (no injections or hook logic), `dev` / `deploy` skips it entirely — not loaded, not executed, not injected, not listed in the summary, with a single `Skipped N placeholder extension entries ...` line. Once you edit the template (e.g. add an injection), it is no longer a placeholder and returns to the execution path, avoiding useless imports and output noise in multi-extension projects.
 
-`deploy` 不会隐藏任何 `__entry.js`：`__entry.js` 对 Shopify 只是扩展目录里的多余文件，多一个文件不会导致 deploy 失败或被拦截，因此 entry（含占位 entry）在 deploy 期间原样保留，只恢复本轮真正写过的注入目标文件。
+## Safety & recovery internals
 
-## 项目结构
+- **Restore markers**: after injecting, `dev` / `deploy` appends a self-describing marker per target file type (placeholder + injected value length + checksum + random token; never the value itself), choosing comment syntax compatible with the file (js/css `/* */`, html `<!-- -->`, liquid `{% comment %}`, toml trailing `#`), so files like `shopify.app*.toml` stay valid TOML. The marker drives both the Git clean filter and crash recovery; the checksum ensures only markers bshopify actually wrote are trusted, so lookalike text or hand-edited values are never wrongly restored.
+- **Git clean filter**: real values injected during `dev` are restored to placeholders by `.bshopify/git-add-cleaner.js` before staging on `git add`. The filter is configured in the local `.git/config`, with the script under the ignored `.bshopify/` — a fresh clone must run `init` for the filter to work. Scripts carry a generated marker: re-running `init` replaces older generated scripts with the latest template and leaves unmarked custom scripts untouched. Files without markers (including binaries) pass through as-is; machines without the filter stage files as-is silently (`required` defaults to `false`).
+- **Pre-commit guard**: `init` inserts a marked `bshopify app guard` block into pre-commit. If a `pre-commit` already exists, the block is inserted after the shebang without overwriting the original content; the hook prefers the project-local `./node_modules/.bin/bshopify` and falls back to PATH. It writes to `core.hooksPath` when configured, otherwise to `.git/hooks/pre-commit`.
 
-```text
-src/
-  cli.ts           # bshopify bin 入口
-  main.ts          # CLI program 工厂、fallback 分发和 Shopify CLI 透传
-  index.ts         # package 对外导出面
-  utils/           # 根通用能力：配置读取、package.json、路径、文件、对象校验、终端输出等
-  app/             # app 域（编排层）：Shopify app 是 extension 的上级，负责整个项目的命令编排
-    commands/      # app 子命令入口；负责参数解析、依赖注入和命令编排
-      index.ts     # app 子命令注册和 app 层 fallback 判断
-      dev/         # app dev 编排入口
-      deploy/      # app deploy 编排入口
-      init/        # app init 初始化流程，按 checks/files/git-hooks/manifest/types 拆分
-    runner/        # app 运行管线：上下文、配置、envFiles 加载、锁、事务、注入执行、Shopify CLI 调用
-  extension/       # extension 域（受管单元层）：Shopify extension 及其 entry，只被 app 依赖
-    types.ts       # ExtensionInfo / ExtensionLifecycle / ManagedEntry 等扩展域类型
-    entries.ts     # 扩展发现 + entry 加载 + 生命周期编排（prepare/validate/beforeDeploy/...）
-    entry-loader.ts # 运行时加载扩展 entry 模块
-    manage.ts       # init 时的 entry 写入与 manifest 记录（与 app 通过结构化类型解耦）
-    manage-content.ts # entry 模板与占位识别
-    paths.ts       # 注入目标路径安全校验
-tests/
-  cli.test.ts      # CLI 元信息、命令面、fallback、目录结构和 dev/deploy 行为测试
-  init.test.ts     # init 文件生成和 check 行为测试
+If you hit an incompatible file type or comment syntax, disable markers explicitly in the config (`restoreMarkers: false`). Without markers, `dev` still restores at exit by matching injected values, but hand-written duplicate values written during `dev` may also be restored, and the Git clean filter can no longer restore injected files.
+
+## FAQ
+
+- **pre-commit not firing?** Make sure the project ran `bshopify app init` (the filter and hook live in the local Git config; a fresh clone must run it again).
+- **`defineConfig` fails to import?** The project has not installed `@standhigher/bshopify` (global only) — switch to the JSDoc form that `init` generates.
+- **Entry edited but `dev` does not inject?** Make sure the entry is no longer the placeholder template — template files are skipped; once changed (any injection added) it returns to the execution path.
+
+## Local development (this repo)
+
+```bash
+npm install
+npm run dev -- --help    # run the CLI directly via tsx
+npm run typecheck        # TypeScript type checking
+npm run test             # Vitest tests
+npm run build            # build to dist/ with tsup
+npm run check            # typecheck + test + build + dist smoke test
 ```
 
-层级上，Shopify 的项目模型是 app 包含 extension（`extensions/` 是其子目录），所以代码也按 "app 编排层 > extension 受管单元层" 组织：运行期只由 `src/app/` 依赖 `src/extension/`，extension 域不反向依赖 app 的运行逻辑（仅 context 组合点使用 app 的上下文类型）。`Entry`（`__entry.js`，bshopify 受管文件）与 `Extension`（Shopify 扩展）在类型与命名上区分开：`ManagedEntry` 表示前者，`ExtensionInfo` 表示后者。
+Local link debugging:
 
-目录边界上，根 `src/utils/` 只放与 Shopify app 域无关的通用能力；`src/app/` 放 app 域编排；`src/extension/` 放扩展域受管单元；具体命令目录只保留该命令自己的编排和局部细节。
+```bash
+npm run build && npm link                       # in the bshopify repo
+npm link @standhigher/bshopify                  # in the target Shopify app project
+bshopify app init --check                       # verify
+npm unlink @standhigher/bshopify                # undo
+```
 
-跨层级引用优先使用 `#/*` 路径别名，例如 `#/utils/node`、`#/app/runner/config`、`#/extension/entries`；同目录或相邻模块可以继续使用相对路径。
-
-## 验证
-
-当前基础验收：
+Pre-publish verification:
 
 ```bash
 npm run check
-npm pack --dry-run
+npm pack --dry-run   # confirm the published contents (files: ["dist"]) are as expected
 ```
-
-`npm run check` 会依次执行 TypeScript 类型检查、Vitest 测试、tsup 构建和构建产物 CLI smoke test。`npm pack --dry-run` 用于确认发布包内容符合预期。
