@@ -24,7 +24,7 @@ export async function ensureGitignoreEntry(
     }
   }
 
-  const next = updateGitignoreTmpBlock(
+  const next = ensureGitignoreCliBlock(
     current,
     gitignoreStateDir,
     nextBlock,
@@ -47,7 +47,7 @@ function formatGitignoreCliBlock(gitignoreStateDir: string): string {
   return `${gitignoreCliComment}\n${gitignoreStateDir}\n`;
 }
 
-function updateGitignoreTmpBlock(
+function ensureGitignoreCliBlock(
   current: string,
   gitignoreStateDir: string,
   nextBlock: string,

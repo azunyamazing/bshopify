@@ -20,11 +20,11 @@
 | 能力 | 对应 Shopify CLI | 说明 |
 |-|-|-|
 | CLI 骨架 / 降级透传 | 全部命令 | ESM+TS+commander+tsup；未接管命令透传 `shopify`，bin 提供 `bshopify`/`bs` |
-| `app init` | `app init` 前置 | 生成 config、gitignore、pre-commit hook、`__entry.js`、manifest；`--check/--update/--cwd` |
+| `app init` | `app init` 前置 | 生成 config、gitignore、pre-commit hook、`__entry.js`、manifest；`--check/--cwd`（无 `--update`：受管文件升级靠 CHANGELOG + 迁移指南，见 5.4） |
 | `app dev` | `app dev` | config 推导、entry 注入 + restore marker、锁、事务 journal、崩溃恢复 |
 | `app deploy` | `app deploy` | 注入、占位符校验、确认流程、`--dry-run`、before/after/onError 钩子 |
 | `app guard` | — | **仅命令占位（no-op）**，pre-commit hook 已写入但本体逻辑未实现 |
-| Runner 架构 | — | app 域 context/injections/lock/transaction + extension 域 entries/entry-loader/manage/manage-stale/manage-content/context/paths 已模块化 |
+| Runner 架构 | — | app 域 context/injections/lock/transaction + extension 域 entries/entry-loader/manage/manage-content/context/paths 已模块化 |
 | entry 类型提示 / 占位跳过 | `app dev`/`app deploy` | `__entry.js` 模板内置 `@ts-check` + JSDoc 引用包公开类型；dev/deploy 跳过未改动的占位模板 entry（不加载、不注入、不列 summary）；deploy 不再隐藏 entry（Shopify 不因多余文件失败） |
 
 **主要缺口**：guard 无真实逻辑；无 validate/restore/status 命令面；dev 不支持 watch；无 CI/发布流水线；无 env 管理；theme 域纯透传。

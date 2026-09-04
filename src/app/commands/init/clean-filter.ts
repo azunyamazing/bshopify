@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { isNodeError } from "#/utils/node";
 import {
   cleanFilterCommand,
+  cleanFilterGeneratedHeader,
   cleanFilterScript,
   cleanFilterScriptName,
   cleanFilterSmudgeCommand,
@@ -17,7 +18,6 @@ const execFileAsync = promisify(execFile);
 export async function writeCleanFilterScript(
   cwd: string,
   result: InitResult,
-  update: boolean,
 ): Promise<string> {
   // Git runs clean/smudge filters from the top level of the working tree, so
   // the script must live under the repo top's `.bshopify/` even when init
@@ -35,14 +35,24 @@ export async function writeCleanFilterScript(
     return displayPath;
   }
 
-  if (!update || current === cleanFilterScript) {
+  if (current === cleanFilterScript || !isGeneratedCleanFilterScript(current)) {
+    // Keep the current script: it is either the latest template or user
+    // content (no bshopify generated header). Only recognizable bshopify
+    // scripts from older versions are refreshed below.
     result.skipped.push(displayPath);
     return displayPath;
   }
 
+  // The script must stay in sync with the marker format produced by
+  // restore-markers.ts, so an outdated bshopify-generated script is replaced
+  // with the latest template whenever init runs again.
   await writeFile(targetPath, cleanFilterScript);
   result.updated.push(displayPath);
   return displayPath;
+}
+
+function isGeneratedCleanFilterScript(content: string): boolean {
+  return content.includes(cleanFilterGeneratedHeader);
 }
 
 async function readCleanFilterScript(targetPath: string): Promise<string> {

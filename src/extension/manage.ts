@@ -1,16 +1,10 @@
 import { constants } from "node:fs";
-import { access, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileIfMissing } from "#/utils/files";
 import { isNodeError } from "#/utils/node";
 import { formatPath, resolvePath } from "#/utils/paths";
-import {
-  createContentHash,
-  getGeneratedEntryContentHash,
-  isGeneratedEntry,
-  managedEntryTemplate,
-} from "./manage-content";
-import { reconcileStaleManagedEntry } from "./manage-stale";
+import { isGeneratedEntry, managedEntryTemplate } from "./manage-content";
 
 /**
  * Minimal change-reporting surface the extension domain needs while managing
@@ -24,7 +18,6 @@ export interface ManagedEntryChanges {
 }
 
 export interface ManagedEntryRecord {
-  contentHash?: string;
   path: string;
 }
 
@@ -60,53 +53,37 @@ export async function readExtensionNames(
   }
 }
 
+/**
+ * Writes the managed entry for every current extension directory and records
+ * tracked entries in the manifest. Missing entries are created from the
+ * latest template; existing files are never overwritten. Manifest entries for
+ * extensions that no longer exist are dropped (bookkeeping only — files on
+ * disk are left untouched).
+ */
 export async function writeManagedEntries(
   cwd: string,
   changes: ManagedEntryChanges,
   options: ManagedEntryOptions,
-  cleanupStaleGeneratedEntries: boolean,
   manifest?: ManagedEntryManifest,
 ): Promise<void> {
   const extensionNames = await readExtensionNames(cwd, options.extensionsRoot);
-  if (cleanupStaleGeneratedEntries && manifest !== undefined) {
-    pruneRemovedManagedEntries(changes, options, extensionNames, manifest);
+
+  if (manifest !== undefined) {
+    pruneRemovedExtensionRecords(changes, options, extensionNames, manifest);
   }
 
   for (const extensionName of extensionNames) {
     const entryPath = join(options.extensionsRoot, extensionName, options.entryFileName);
     const absoluteEntryPath = resolvePath(cwd, entryPath);
     const wasTracked = manifest?.entries[extensionName] !== undefined;
-    const staleEntryResult = cleanupStaleGeneratedEntries
-      ? await reconcileStaleManagedEntry(cwd, changes, options, extensionName, manifest)
-      : { shouldRecordTarget: true, shouldWriteTarget: true };
-    let created = false;
-
-    if (staleEntryResult.shouldWriteTarget) {
-      created = await writeFileIfMissing(cwd, entryPath, managedEntryTemplate, changes);
-      if (!created && cleanupStaleGeneratedEntries) {
-        await updateManagedGeneratedEntry(cwd, changes, entryPath, extensionName, manifest);
-      }
-    } else if (cleanupStaleGeneratedEntries) {
-      await updateManagedGeneratedEntry(cwd, changes, entryPath, extensionName, manifest);
-    }
+    const created = await writeFileIfMissing(cwd, entryPath, managedEntryTemplate, changes);
 
     if (
       manifest !== undefined
-      && staleEntryResult.shouldRecordTarget
       && await shouldRecordManagedEntry(absoluteEntryPath, created, wasTracked)
     ) {
-      recordManagedEntry(
-        manifest,
-        extensionName,
-        cwd,
-        absoluteEntryPath,
-        await getGeneratedEntryContentHash(absoluteEntryPath),
-      );
-    } else if (
-      manifest !== undefined
-      && staleEntryResult.shouldRecordTarget
-      && await pathExists(absoluteEntryPath)
-    ) {
+      recordManagedEntry(manifest, extensionName, cwd, absoluteEntryPath);
+    } else if (manifest !== undefined && await pathExists(absoluteEntryPath)) {
       changes.warnings.push(`custom extension entry left unmanaged: ${entryPath}`);
     }
   }
@@ -117,15 +94,13 @@ function recordManagedEntry(
   extensionName: string,
   cwd: string,
   absolutePath: string,
-  contentHash?: string,
 ): void {
   manifest.entries[extensionName] = {
-    ...(contentHash === undefined ? {} : { contentHash }),
     path: formatPath(cwd, absolutePath),
   };
 }
 
-function pruneRemovedManagedEntries(
+function pruneRemovedExtensionRecords(
   changes: ManagedEntryChanges,
   options: ManagedEntryOptions,
   extensionNames: string[],
@@ -140,7 +115,7 @@ function pruneRemovedManagedEntries(
 
     delete manifest.entries[extensionName];
     changes.updated.push(
-      `removed stale manifest entry ${join(options.extensionsRoot, extensionName)}`,
+      `removed manifest entry for missing extension ${join(options.extensionsRoot, extensionName)}`,
     );
   }
 }
@@ -151,28 +126,6 @@ async function shouldRecordManagedEntry(
   wasTracked: boolean,
 ): Promise<boolean> {
   return created || wasTracked || await isGeneratedEntry(path);
-}
-
-async function updateManagedGeneratedEntry(
-  cwd: string,
-  changes: ManagedEntryChanges,
-  entryPath: string,
-  extensionName: string,
-  manifest: ManagedEntryManifest | undefined,
-): Promise<void> {
-  const previousHash = manifest?.entries[extensionName]?.contentHash;
-  if (previousHash === undefined) {
-    return;
-  }
-
-  const absoluteEntryPath = resolvePath(cwd, entryPath);
-  const current = await readFile(absoluteEntryPath, "utf8");
-  if (current === managedEntryTemplate || createContentHash(current) !== previousHash) {
-    return;
-  }
-
-  await writeFile(absoluteEntryPath, managedEntryTemplate);
-  changes.updated.push(`updated generated extension entry ${entryPath}`);
 }
 
 async function pathExists(path: string): Promise<boolean> {

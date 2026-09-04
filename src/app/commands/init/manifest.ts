@@ -17,7 +17,6 @@ export interface InitManifest {
 }
 
 export interface InitManifestEntry {
-  contentHash?: string;
   path: string;
 }
 
@@ -117,7 +116,6 @@ function normalizeManagedEntries(value: unknown): Record<string, InitManifestEnt
     }
 
     entries[name] = {
-      ...(typeof entry.contentHash === "string" ? { contentHash: entry.contentHash } : {}),
       path: entry.path,
     };
   }

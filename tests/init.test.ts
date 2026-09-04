@@ -1,8 +1,7 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { formatInitResult, initProject } from "../src";
@@ -17,7 +16,7 @@ interface FixturePackageJson {
 
 interface FixtureInitManifest {
   cleanFilter?: { path: string };
-  entries: Record<string, { contentHash?: string; path: string }>;
+  entries: Record<string, { path: string }>;
   preCommitHook?: { path: string };
   version: number;
 }
@@ -153,7 +152,27 @@ describe("initProject", () => {
     );
   });
 
-  it("migrates legacy extensionEntries manifest keys to entries on update", async () => {
+  it("drops manifest entries for extensions that no longer exist", async () => {
+    const cwd = await createTempProject();
+    await mkdir(join(cwd, "extensions", "removed-extension"), { recursive: true });
+    await initProject({ cwd });
+    await rm(join(cwd, "extensions", "removed-extension"), { recursive: true });
+
+    const result = await initProject({ cwd });
+    const manifest = JSON.parse(
+      await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
+    ) as FixtureInitManifest;
+
+    expect(manifest.entries["removed-extension"]).toBeUndefined();
+    expect(manifest.entries["theme-extension"]?.path).toBe(
+      "extensions/theme-extension/__entry.js",
+    );
+    expect(result.updated).toContain(
+      "removed manifest entry for missing extension extensions/removed-extension",
+    );
+  });
+
+  it("migrates legacy extensionEntries manifest keys when reading an older manifest", async () => {
     const cwd = await createTempProject();
     await initProject({ cwd });
     await writeFile(
@@ -163,7 +182,6 @@ describe("initProject", () => {
           configFile: "bshopify.config.mjs",
           extensionEntries: {
             "theme-extension": {
-              contentHash: "legacy-hash",
               path: "extensions/theme-extension/__entry.js",
             },
           },
@@ -175,7 +193,7 @@ describe("initProject", () => {
       )}\n`,
     );
 
-    await initProject({ cwd, update: true });
+    await initProject({ cwd });
     const manifest = JSON.parse(
       await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
     ) as FixtureInitManifest;
@@ -217,7 +235,7 @@ describe("initProject", () => {
     expect(result.updated).toContain(".git/hooks/pre-commit");
   });
 
-  it("updates existing app guard blocks to the latest managed content", async () => {
+  it("refreshes existing app guard blocks to the latest managed content", async () => {
     const cwd = await createTempProject();
     const hookPath = join(cwd, ".git", "hooks", "pre-commit");
     await writeFile(
@@ -225,7 +243,7 @@ describe("initProject", () => {
       "#!/usr/bin/env sh\n# bshopify app guard start\nbshopify app guard\n# bshopify app guard end\nnpm test\n",
     );
 
-    const result = await initProject({ cwd, update: true });
+    const result = await initProject({ cwd });
     const hook = await readFile(hookPath, "utf8");
 
     expect(hook).toContain("./node_modules/.bin/bshopify app guard");
@@ -292,25 +310,6 @@ describe("initProject", () => {
     expect(result.created).toContain("absolute-hooks/pre-commit");
   });
 
-  it("removes stale managed pre-commit blocks when core.hooksPath changes on update", async () => {
-    const cwd = await createTempProject();
-    const defaultHookPath = join(cwd, ".git", "hooks", "pre-commit");
-    await initProject({ cwd });
-    await execFileAsync("git", ["config", "core.hooksPath", ".custom-hooks"], { cwd });
-
-    const result = await initProject({ cwd, update: true });
-    const defaultHook = await readFile(defaultHookPath, "utf8");
-    const customHook = await readFile(join(cwd, ".custom-hooks", "pre-commit"), "utf8");
-    const manifest = JSON.parse(
-      await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
-    ) as FixtureInitManifest;
-
-    expect(defaultHook).not.toContain("# bshopify app guard start");
-    expect(customHook).toContain("# bshopify app guard start");
-    expect(manifest.preCommitHook?.path).toBe(".custom-hooks/pre-commit");
-    expect(result.updated).toContain("removed stale pre-commit guard .git/hooks/pre-commit");
-  });
-
   it("clears stale pre-commit manifest tracking when no git hook path is available", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "bshopify-no-git-"));
     tempDirs.push(cwd);
@@ -336,7 +335,7 @@ describe("initProject", () => {
       )}\n`,
     );
 
-    const result = await initProject({ cwd, update: true });
+    const result = await initProject({ cwd });
     const manifest = JSON.parse(
       await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
     ) as FixtureInitManifest;
@@ -378,7 +377,7 @@ describe("initProject", () => {
     await writeFile(existingEntryPath, "export default { custom: true };\n");
     await mkdir(join(cwd, "extensions", "new-theme-extension"), { recursive: true });
 
-    const result = await initProject({ cwd, update: true });
+    const result = await initProject({ cwd });
 
     await expect(readFile(existingEntryPath, "utf8")).resolves.toBe(
       "export default { custom: true };\n",
@@ -390,14 +389,14 @@ describe("initProject", () => {
     expect(result.skipped).toContain("extensions/theme-extension/__entry.js");
   });
 
-  it("uses runner config when syncing extension entries", async () => {
+  it("uses the configured entry file name when creating extension entries", async () => {
     const cwd = await createTempProject();
     await writeFile(
       join(cwd, "bshopify.config.mjs"),
       "export default { entryFileName: 'entry.mjs' };\n",
     );
 
-    const result = await initProject({ cwd, update: true });
+    const result = await initProject({ cwd });
 
     await expect(
       readFile(join(cwd, "extensions", "theme-extension", "entry.mjs"), "utf8"),
@@ -415,7 +414,7 @@ describe("initProject", () => {
       "export default { entryFileName: 'entry.mjs' };\n",
     );
 
-    const result = await initProject({ cwd, update: true });
+    const result = await initProject({ cwd });
     const manifest = JSON.parse(
       await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
     ) as FixtureInitManifest;
@@ -445,7 +444,7 @@ describe("initProject", () => {
       ].join("\n"),
     );
 
-    const result = await initProject({ cwd, update: true });
+    const result = await initProject({ cwd });
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
 
     expect(runnerConfig).toContain('entryFileName: "entry.mjs"');
@@ -477,7 +476,7 @@ describe("initProject", () => {
       ].join("\n"),
     );
 
-    const result = await initProject({ cwd, update: true });
+    const result = await initProject({ cwd });
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
 
     expect(result.errors).toEqual([]);
@@ -521,7 +520,7 @@ describe("initProject", () => {
       ].join("\n"),
     );
 
-    const result = await initProject({ cwd, update: true });
+    const result = await initProject({ cwd });
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
 
     expect(result.errors).toEqual([]);
@@ -550,7 +549,7 @@ describe("initProject", () => {
       ].join("\n"),
     );
 
-    await initProject({ cwd, update: true });
+    await initProject({ cwd });
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
 
     expect(runnerConfig).toContain("  custom: {");
@@ -574,7 +573,7 @@ describe("initProject", () => {
       ].join("\n"),
     );
 
-    await initProject({ cwd, update: true });
+    await initProject({ cwd });
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
 
     expect(runnerConfig).toContain('customField: "kept"');
@@ -582,7 +581,7 @@ describe("initProject", () => {
     expect(runnerConfig.match(/restoreMarkers:/g)).toHaveLength(1);
   });
 
-  it("leaves package.json scripts untouched on update", async () => {
+  it("leaves package.json scripts untouched", async () => {
     const cwd = await createTempProject();
     await writeFile(
       join(cwd, "package.json"),
@@ -598,299 +597,26 @@ describe("initProject", () => {
       )}\n`,
     );
 
-    const result = await initProject({ cwd, update: true });
+    const result = await initProject({ cwd });
     const packageJson = JSON.parse(
       await readFile(join(cwd, "package.json"), "utf8"),
     ) as FixturePackageJson;
 
     expect(packageJson.scripts.dev).toBe("pnpm custom-dev");
     expect(packageJson.scripts.deploy).toBeUndefined();
-    // init never reports package.json script changes in the update summary.
+    // init never reports package.json script changes in the summary.
     expect(result.updated).not.toContain(expect.stringContaining("package.json scripts"));
   });
 
-  it("renames stale generated extension entries when the configured entry name changes", async () => {
-    const cwd = await createTempProject();
-    await initProject({ cwd });
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry.mjs' };\n",
-    );
 
-    const result = await initProject({ cwd, update: true });
 
-    await expect(
-      stat(join(cwd, "extensions", "theme-extension", "__entry.js")),
-    ).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await expect(
-      readFile(join(cwd, "extensions", "theme-extension", "entry.mjs"), "utf8"),
-    ).resolves.toContain("async prepare(ctx)");
-    expect(result.updated).toContain(
-      "renamed extension entry extensions/theme-extension/__entry.js -> extensions/theme-extension/entry.mjs",
-    );
-  });
 
-  it("renames stale customized extension entries when the configured entry name changes", async () => {
-    const cwd = await createTempProject();
-    const staleEntryPath = join(cwd, "extensions", "theme-extension", "__entry.js");
-    await initProject({ cwd });
-    await writeFile(staleEntryPath, "export default { custom: true };\n");
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry.mjs' };\n",
-    );
 
-    const result = await initProject({ cwd, update: true });
 
-    await expect(stat(staleEntryPath)).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await expect(
-      readFile(join(cwd, "extensions", "theme-extension", "entry.mjs"), "utf8"),
-    ).resolves.toBe("export default { custom: true };\n");
-    expect(result.updated).toContain(
-      "renamed extension entry extensions/theme-extension/__entry.js -> extensions/theme-extension/entry.mjs",
-    );
-  });
 
-  it("renames manifest-tracked extension entries across multiple configured entry names", async () => {
-    const cwd = await createTempProject();
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry-a.mjs' };\n",
-    );
-    await initProject({ cwd });
-    await writeFile(
-      join(cwd, "extensions", "theme-extension", "entry-a.mjs"),
-      "export default { custom: true };\n",
-    );
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry-b.mjs' };\n",
-    );
 
-    const result = await initProject({ cwd, update: true });
 
-    await expect(
-      stat(join(cwd, "extensions", "theme-extension", "entry-a.mjs")),
-    ).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-    await expect(
-      readFile(join(cwd, "extensions", "theme-extension", "entry-b.mjs"), "utf8"),
-    ).resolves.toBe("export default { custom: true };\n");
-    expect(result.updated).toContain(
-      "renamed extension entry extensions/theme-extension/entry-a.mjs -> extensions/theme-extension/entry-b.mjs",
-    );
-  });
 
-  it("keeps stale customized extension entries when the configured entry already exists", async () => {
-    const cwd = await createTempProject();
-    const staleEntryPath = join(cwd, "extensions", "theme-extension", "__entry.js");
-    await initProject({ cwd });
-    await writeFile(staleEntryPath, "export default { custom: true };\n");
-    await writeFile(join(cwd, "extensions", "theme-extension", "entry.mjs"), "export default {};\n");
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry.mjs' };\n",
-    );
-
-    const result = await initProject({ cwd, update: true });
-
-    await expect(readFile(staleEntryPath, "utf8")).resolves.toBe(
-      "export default { custom: true };\n",
-    );
-    expect(result.warnings).toContain(
-      "custom stale entry left in place: extensions/theme-extension/__entry.js",
-    );
-  });
-
-  it("does not track a custom target entry when removing a stale generated entry", async () => {
-    const cwd = await createTempProject();
-    await initProject({ cwd });
-    await writeFile(
-      join(cwd, "extensions", "theme-extension", "entry.mjs"),
-      "export default { custom: true };\n",
-    );
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry.mjs' };\n",
-    );
-
-    const result = await initProject({ cwd, update: true });
-    const manifest = JSON.parse(
-      await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
-    ) as FixtureInitManifest;
-
-    expect(manifest.entries["theme-extension"]).toBeUndefined();
-    expect(result.updated).toContain(
-      "removed stale generated entry extensions/theme-extension/__entry.js",
-    );
-    expect(result.warnings).toContain(
-      "custom extension entry left unmanaged: extensions/theme-extension/entry.mjs",
-    );
-  });
-
-  it("keeps manifest-tracked custom stale entries tracked when the configured entry already exists", async () => {
-    const cwd = await createTempProject();
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry-a.mjs' };\n",
-    );
-    await initProject({ cwd });
-    await writeFile(
-      join(cwd, "extensions", "theme-extension", "entry-a.mjs"),
-      "export default { custom: true };\n",
-    );
-    await writeFile(
-      join(cwd, "extensions", "theme-extension", "entry-b.mjs"),
-      "export default { existing: true };\n",
-    );
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry-b.mjs' };\n",
-    );
-
-    const result = await initProject({ cwd, update: true });
-    const manifest = JSON.parse(
-      await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
-    ) as FixtureInitManifest;
-
-    await expect(
-      readFile(join(cwd, "extensions", "theme-extension", "entry-a.mjs"), "utf8"),
-    ).resolves.toBe("export default { custom: true };\n");
-    await expect(
-      readFile(join(cwd, "extensions", "theme-extension", "entry-b.mjs"), "utf8"),
-    ).resolves.toBe("export default { existing: true };\n");
-    expect(result.warnings).toContain(
-      "custom stale entry left in place: extensions/theme-extension/entry-a.mjs",
-    );
-    expect(manifest.entries["theme-extension"]?.path).toBe(
-      "extensions/theme-extension/entry-a.mjs",
-    );
-  });
-
-  it("does not remove untracked template-like files while cleaning stale entries", async () => {
-    const cwd = await createTempProject();
-    await initProject({ cwd });
-    const generatedEntry = await readFile(
-      join(cwd, "extensions", "theme-extension", "__entry.js"),
-      "utf8",
-    );
-    const untrackedTemplateLikeFile = join(
-      cwd,
-      "extensions",
-      "theme-extension",
-      "notes.js",
-    );
-    await writeFile(untrackedTemplateLikeFile, generatedEntry);
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry.mjs' };\n",
-    );
-
-    await initProject({ cwd, update: true });
-
-    await expect(readFile(untrackedTemplateLikeFile, "utf8")).resolves.toBe(
-      generatedEntry,
-    );
-  });
-
-  it("updates manifest-tracked generated extension entries to the latest template", async () => {
-    const cwd = await createTempProject();
-    const entryPath = join(cwd, "extensions", "theme-extension", "__entry.js");
-    await initProject({ cwd });
-    const manifest = JSON.parse(
-      await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
-    ) as FixtureInitManifest;
-    const oldGeneratedEntry = "export default { async prepare() { return { injections: [] }; } };\n";
-    const oldGeneratedHash = createHash("sha256").update(oldGeneratedEntry).digest("hex");
-    await writeFile(entryPath, oldGeneratedEntry);
-    await writeFile(
-      join(cwd, ".bshopify", "bshopify.manifest.json"),
-      `${JSON.stringify(
-        {
-          ...manifest,
-          entries: {
-            "theme-extension": {
-              contentHash: oldGeneratedHash,
-              path: "extensions/theme-extension/__entry.js",
-            },
-          },
-        },
-        null,
-        2,
-      )}\n`,
-    );
-
-    const result = await initProject({ cwd, update: true });
-
-    await expect(readFile(entryPath, "utf8")).resolves.toContain("async beforeDeploy(ctx, plan, plans)");
-    expect(result.updated).toContain(
-      "updated generated extension entry extensions/theme-extension/__entry.js",
-    );
-  });
-
-  it("ignores manifest entry paths outside the extension directory", async () => {
-    const cwd = await createTempProject();
-    const outsideDir = await mkdtemp(join(tmpdir(), "bshopify-outside-"));
-    tempDirs.push(outsideDir);
-    const outsideEntry = join(outsideDir, "entry.js");
-    await initProject({ cwd });
-    await writeFile(outsideEntry, "export default { outside: true };\n");
-    await writeFile(
-      join(cwd, "bshopify.config.mjs"),
-      "export default { entryFileName: 'entry.mjs' };\n",
-    );
-    await writeFile(
-      join(cwd, ".bshopify", "bshopify.manifest.json"),
-      `${JSON.stringify(
-        {
-          configFile: "bshopify.config.mjs",
-          entries: {
-            "theme-extension": {
-              path: relative(cwd, outsideEntry),
-            },
-          },
-          gitignore: { path: ".gitignore" },
-          version: 1,
-        },
-        null,
-        2,
-      )}\n`,
-    );
-
-    const result = await initProject({ cwd, update: true });
-
-    await expect(readFile(outsideEntry, "utf8")).resolves.toBe(
-      "export default { outside: true };\n",
-    );
-    await expect(
-      readFile(join(cwd, "extensions", "theme-extension", "entry.mjs"), "utf8"),
-    ).resolves.toContain("async prepare(ctx)");
-    expect(result.warnings).toContain(
-      `ignored manifest entry outside extension directory: ${relative(cwd, outsideEntry)}`,
-    );
-  });
-
-  it("prunes manifest entries for extensions that no longer exist on update", async () => {
-    const cwd = await createTempProject();
-    await mkdir(join(cwd, "extensions", "removed-extension"), { recursive: true });
-    await initProject({ cwd });
-    await rm(join(cwd, "extensions", "removed-extension"), { recursive: true });
-
-    const result = await initProject({ cwd, update: true });
-    const manifest = JSON.parse(
-      await readFile(join(cwd, ".bshopify", "bshopify.manifest.json"), "utf8"),
-    ) as FixtureInitManifest;
-
-    expect(manifest.entries["removed-extension"]).toBeUndefined();
-    expect(result.updated).toContain(
-      "removed stale manifest entry extensions/removed-extension",
-    );
-  });
 
   it("writes the git clean filter script, gitattributes entry, and git config", async () => {
     const cwd = await createTempProject();
@@ -948,20 +674,6 @@ describe("initProject", () => {
     expect(result.skipped).toContain("git config filter.bshopify");
   });
 
-  it("syncs the clean filter script to the latest template on update", async () => {
-    const cwd = await createTempProject();
-    await initProject({ cwd });
-    const scriptPath = join(cwd, ".bshopify", "git-add-cleaner.js");
-    await writeFile(scriptPath, "// user-tampered\n");
-
-    const result = await initProject({ cwd, update: true });
-
-    const script = await readFile(scriptPath, "utf8");
-    expect(script).toContain("bshopify-restore:");
-    expect(script).not.toContain("user-tampered");
-    expect(result.updated).toContain(".bshopify/git-add-cleaner.js");
-    expect(result.skipped).not.toContain(".bshopify/git-add-cleaner.js");
-  });
 
   it("keeps a custom clean filter script on plain init", async () => {
     const cwd = await createTempProject();
@@ -974,6 +686,24 @@ describe("initProject", () => {
       readFile(join(cwd, ".bshopify", "git-add-cleaner.js"), "utf8"),
     ).resolves.toBe("// custom\n");
     expect(result.skipped).toContain(".bshopify/git-add-cleaner.js");
+  });
+
+  it("refreshes an outdated bshopify-generated clean filter script on re-init", async () => {
+    const cwd = await createTempProject();
+    await initProject({ cwd });
+    const scriptPath = join(cwd, ".bshopify", "git-add-cleaner.js");
+    await writeFile(
+      scriptPath,
+      "// Generated by bshopify (bshopify app init). Do not edit by hand.\n// stale old template\n",
+    );
+
+    const result = await initProject({ cwd });
+
+    const script = await readFile(scriptPath, "utf8");
+    expect(script).toContain("bshopify-restore:");
+    expect(script).not.toContain("stale old template");
+    expect(result.updated).toContain(".bshopify/git-add-cleaner.js");
+    expect(result.skipped).not.toContain(".bshopify/git-add-cleaner.js");
   });
 
   it("reports clean filter readiness during check", async () => {
@@ -1317,43 +1047,5 @@ describe("initProject", () => {
     expect(summary).toContain("  \u001B[31mx\u001B[39m missing extensions");
   });
 
-  it("formats update summaries with a local changes block", () => {
-    const summary = formatInitResult({
-      checks: [{ name: "package.json", ok: true, message: "found package.json" }],
-      created: ["extensions/new-extension/__entry.js"],
-      errors: [],
-      mode: "update",
-      skipped: [],
-      updated: [".gitignore"],
-      warnings: ["custom stale entry left in place: extensions/theme-extension/__entry.js"],
-    });
 
-    expect(summary).toContain("\u001B[1mbshopify app init --update\u001B[22m");
-    expect(summary).toContain("\n\n\u001B[1m\u001B[36mLocal changes\u001B[39m\u001B[22m\n\n");
-    expect(summary).toContain(
-      "  \u001B[32m+\u001B[39m created extensions/new-extension/__entry.js",
-    );
-    expect(summary).toContain("  \u001B[36m~\u001B[39m updated .gitignore");
-    expect(summary).toContain(
-      "  \u001B[33m!\u001B[39m warning custom stale entry left in place: extensions/theme-extension/__entry.js",
-    );
-    expect(summary).not.toContain("\u001B[1m\u001B[32mCreated\u001B[39m\u001B[22m");
-    expect(summary).not.toContain("\u001B[1m\u001B[36mUpdated\u001B[39m\u001B[22m");
-    expect(summary).not.toContain("\u001B[1m\u001B[33mWarnings\u001B[39m\u001B[22m");
-  });
-
-  it("formats update summaries when there are no local changes", () => {
-    const summary = formatInitResult({
-      checks: [{ name: "package.json", ok: true, message: "found package.json" }],
-      created: [],
-      errors: [],
-      mode: "update",
-      skipped: [".gitattributes"],
-      updated: [],
-      warnings: [],
-    });
-
-    expect(summary).toContain("\n\n\u001B[1m\u001B[36mLocal changes\u001B[39m\u001B[22m\n\n");
-    expect(summary).toContain("  \u001B[90m-\u001B[39m no local changes");
-  });
 });

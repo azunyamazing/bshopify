@@ -25,7 +25,6 @@ interface GitHookPath {
 export async function writePreCommitHook(
   cwd: string,
   result: InitResult,
-  previousHookPath?: string,
 ): Promise<string | undefined> {
   const hookPath = await resolveGitHookPath(cwd);
 
@@ -43,8 +42,6 @@ export async function writePreCommitHook(
   if (created) {
     await chmod(hookPath.absolutePath, 0o755);
   }
-
-  await cleanupPreviousPreCommitGuard(cwd, result, previousHookPath, hookPath);
 
   return hookPath.displayPath;
 }
@@ -110,49 +107,6 @@ function replacePreCommitGuardBlock(current: string): string {
   );
 
   return current.replace(blockPattern, guardBlock);
-}
-
-async function cleanupPreviousPreCommitGuard(
-  cwd: string,
-  result: InitResult,
-  previousHookPath: string | undefined,
-  currentHookPath: GitHookPath,
-): Promise<void> {
-  if (previousHookPath === undefined) {
-    return;
-  }
-
-  const previousAbsolutePath = resolveProjectPath(cwd, previousHookPath);
-  if (previousAbsolutePath === currentHookPath.absolutePath) {
-    return;
-  }
-
-  let current = "";
-  try {
-    current = await readFile(previousAbsolutePath, "utf8");
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return;
-    }
-
-    throw error;
-  }
-
-  const next = removePreCommitGuardBlock(current);
-  if (next === current) {
-    return;
-  }
-
-  await writeFile(previousAbsolutePath, next);
-  result.updated.push(`removed stale pre-commit guard ${toDisplayPath(cwd, previousAbsolutePath)}`);
-}
-
-function removePreCommitGuardBlock(current: string): string {
-  const blockPattern = new RegExp(
-    `\\n?${escapeRegExp(preCommitGuardStartMarker)}\\n[\\s\\S]*?${escapeRegExp(preCommitGuardEndMarker)}\\n?`,
-  );
-
-  return current.replace(blockPattern, "\n").replace(/\n{3,}/g, "\n\n");
 }
 
 function removeLegacyPreCommitGuardBlock(lines: string[]): string[] {

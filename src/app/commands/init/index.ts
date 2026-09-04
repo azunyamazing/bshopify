@@ -27,7 +27,6 @@ import { formatChecks } from "./utils";
 export async function initProject(options: InitOptions = {}): Promise<InitResult> {
   const cwd = options.cwd ?? process.cwd();
   const result = createEmptyResult();
-  result.mode = getInitMode(options);
   let config: RunnerConfig;
   try {
     config = await loadRunnerConfig(cwd);
@@ -68,15 +67,12 @@ export async function initProject(options: InitOptions = {}): Promise<InitResult
 
   await writeRunnerConfig(cwd, result, configFiles, config.configFiles);
   await ensureGitignoreEntry(cwd, result, bshopifyStateDir);
-  const cleanFilterPath = await writeCleanFilterScript(cwd, result, options.update === true);
+  const cleanFilterPath = await writeCleanFilterScript(cwd, result);
   recordCleanFilter(manifest, cleanFilterPath);
   await ensureGitattributesEntry(cwd, result, config.extensionsRoot);
   await configureGitFilters(cwd, result);
 
-  const previousPreCommitHookPath = options.update === true
-    ? manifest.preCommitHook?.path
-    : undefined;
-  const preCommitHookPath = await writePreCommitHook(cwd, result, previousPreCommitHookPath);
+  const preCommitHookPath = await writePreCommitHook(cwd, result);
   recordPreCommitHook(manifest, preCommitHookPath);
   await writeManagedEntries(
     cwd,
@@ -85,7 +81,6 @@ export async function initProject(options: InitOptions = {}): Promise<InitResult
       entryFileName: config.entryFileName,
       extensionsRoot: config.extensionsRoot,
     },
-    options.update === true,
     manifest,
   );
   applyRunnerConfigToManifest(manifest);
@@ -98,15 +93,15 @@ export function formatInitResult(result: InitResult): string {
   const lines = [
     "",
     ...formatChecks(result.checks),
-    ...formatLocalChanges(result),
-    ...formatStandardChangeSections(result),
+    ...formatSection("created", result.created),
+    ...formatSection("updated", result.updated),
+    ...formatSection("warnings", result.warnings),
     ...formatSection("skipped", result.skipped),
     ...formatSection("errors", result.errors),
     "\n",
   ];
 
-  const command = result.mode === "update" ? "bshopify app init --update" : "bshopify app init";
-  return colorize(command, ansi.bold) + lines.join("\n");
+  return colorize("bshopify app init", ansi.bold) + lines.join("\n");
 }
 
 function createEmptyResult(): InitResult {
@@ -118,43 +113,4 @@ function createEmptyResult(): InitResult {
     updated: [],
     warnings: [],
   };
-}
-
-function getInitMode(options: InitOptions): "check" | "init" | "update" {
-  if (options.check === true) {
-    return "check";
-  }
-
-  return options.update === true ? "update" : "init";
-}
-
-function formatLocalChanges(result: InitResult): string[] {
-  if (result.mode !== "update") {
-    return [];
-  }
-
-  const items = [
-    ...result.created.map((item) => `  ${colorize("+", ansi.green)} created ${item}`),
-    ...result.updated.map((item) => `  ${colorize("~", ansi.cyan)} updated ${item}`),
-    ...result.warnings.map((item) => `  ${colorize("!", ansi.yellow)} warning ${item}`),
-  ];
-
-  return [
-    "",
-    colorize(colorize("Local changes", ansi.cyan), ansi.bold),
-    "",
-    ...(items.length > 0 ? items : [`  ${colorize("-", ansi.gray)} no local changes`]),
-  ];
-}
-
-function formatStandardChangeSections(result: InitResult): string[] {
-  if (result.mode === "update") {
-    return [];
-  }
-
-  return [
-    ...formatSection("created", result.created),
-    ...formatSection("updated", result.updated),
-    ...formatSection("warnings", result.warnings),
-  ];
 }

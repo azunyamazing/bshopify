@@ -31,7 +31,6 @@ interface DevCommandOptions {
 interface InitCommandOptions {
   check?: boolean;
   cwd?: string;
-  update?: boolean;
 }
 
 export interface AppCommandDependencies {
@@ -74,7 +73,6 @@ export function createAppCommand(dependencies: AppCommandDependencies = {}): Com
     .command("init")
     .description("Initialize bshopify in the current Shopify app project.")
     .option("--check", "only check project readiness without writing files")
-    .option("--update", "sync bshopify generated files for an existing project")
     .option("--cwd <path>", "project directory to initialize")
     .action(async (options: InitCommandOptions) => {
       const result = await initializeProject(toInitOptions(options));
@@ -173,7 +171,6 @@ function toInitOptions(options: InitCommandOptions): InitOptions {
   return {
     check: options.check,
     cwd: options.cwd,
-    update: options.update,
   };
 }
 

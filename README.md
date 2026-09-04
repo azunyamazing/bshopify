@@ -125,7 +125,7 @@ bshopify app init
 
 `configFiles` 指向的 Shopify app TOML 文件缺失时，`init` 不再直接停止。刚起步的项目没有分环境配置，因此**所有环境共享同一个配置文件**：如果项目里已存在任意 `shopify.app*.toml`（含配置中已存在的），直接复用该文件并让 `configFiles` 的各环境都指向它，不触发生成；如果项目里一个 TOML 都没有，则只调用一次 `shopify app config link` 生成默认 `shopify.app.toml`，并让 `configFiles` 的 dev / test / production 都指向它。生成成功会记入 created 摘要并继续后续流程，生成失败则仍按缺失文件报错。`--check` 只做只读检查，不会触发生成。
 
-Git clean filter：dev 运行期间扩展文件里的占位符被临时替换成真实值，此时执行 `git add` 会先经过 `git-add-cleaner.js` 把注入值还原成占位符再进暂存区，避免真实 URL/密钥被提交。filter 命令写在本地 `.git/config`（由 `init` 写入），脚本存放在被 ignore 的 `.bshopify/` 下——新 clone 必须跑过 `init` filter 才会生效，`init --update` 会按 CLI 最新模板直接替换脚本。无注入 marker 的文件（含二进制）原样透传；`required` 默认为 `false`，未配置 filter 的机器会静默按原样暂存。`init` 不会对已跟踪文件做任何改写：首次接入时 bshopify 尚未注入过任何值，用户自己的改动保持原样。
+Git clean filter：dev 运行期间扩展文件里的占位符被临时替换成真实值，此时执行 `git add` 会先经过 `git-add-cleaner.js` 把注入值还原成占位符再进暂存区，避免真实 URL/密钥被提交。filter 命令写在本地 `.git/config`（由 `init` 写入），脚本存放在被 ignore 的 `.bshopify/` 下——新 clone 必须跑过 `init` filter 才会生效。脚本头部带 bshopify 生成标记：重跑 `init` 时，可识别为 bshopify 生成的旧版脚本会被直接替换为最新模板（脚本必须与当前注入 marker 格式同步，见下），不含该标记的自定义脚本保留不动。无注入 marker 的文件（含二进制）原样透传；`required` 默认为 `false`，未配置 filter 的机器会静默按原样暂存。`init` 不会对已跟踪文件做任何改写：首次接入时 bshopify 尚未注入过任何值，用户自己的改动保持原样。
 
 Git hook 写入规则：如果当前项目配置了 `core.hooksPath`，会写入该目录；否则写入 Git 默认的 `.git/hooks/pre-commit`。如果 `pre-commit` 已存在，`init` 会在 shebang 后插入带标记的 `bshopify app guard` block，不会覆盖原有 hook 内容。hook 执行时会优先使用项目本地 `./node_modules/.bin/bshopify`，不存在时再回退到 PATH 中的 `bshopify`。
 
@@ -137,13 +137,11 @@ Git hook 写入规则：如果当前项目配置了 `core.hooksPath`，会写入
 bshopify app init --check
 ```
 
-已有项目同步 bshopify 受管文件：
+重复执行 `init` 是幂等的：补齐缺失的受管文件并刷新 manifest。对已存在的内容只做安全增量——pre-commit guard block 会刷新到当前模板，带生成标记的旧版 clean filter 脚本会被替换为最新模板，`.gitattributes` / git config 确保 bshopify 相关配置为当前值，`.gitignore` / `bshopify.config.mjs` 只补缺失项——已存在的 entry 文件不会被覆盖。
 
-```bash
-bshopify app init --update
-```
+**升级 bshopify**：CLI 不提供 `--update` 这类自动迁移命令（与 Vite 等构建工具的做法一致）。升级到新版本后，`init` 会在下次执行时自动刷新两类受管内容——guard block 与带生成标记的旧版 clean filter 脚本；其余受管文件（生成的 entry 模板、manifest 坐标变更等）不会自动迁移，请查阅包的 CHANGELOG 与迁移指南按说明处理，必要时删除旧生成文件后重新执行 `bshopify app init`，或手工应用新模板。
 
-`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录受管 entry 路径、Git hook 路径和 clean filter 脚本路径。`--update` 会读取当前 `bshopify.config.mjs` 和 manifest，先按旧坐标迁移或清理受管资源，再补齐缺失文件并写回 manifest。已有的 `bshopify.config.mjs` 不会被覆盖；entry 文件名属于内部默认（`__entry.js`），若旧配置改过它，`--update` 会按 manifest 记录的旧路径 rename 到新文件名；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`；clean filter 脚本在 update 时同步为最新模板。`package.json` 不在受管范围内，scripts 由你自行维护。
+`init` 会在 `.bshopify/` 下写入 `bshopify.manifest.json` 作为受管资源索引，记录受管 entry 路径、Git hook 路径和 clean filter 脚本路径。已有的 `bshopify.config.mjs` 不会被覆盖（缺字段时只做合并）；`.gitignore` 会写入 `# bshopify cli` 和 `.bshopify/`。`package.json` 不在受管范围内，scripts 由你自行维护。
 
 对指定目录执行初始化：
 
@@ -204,7 +202,7 @@ export default {
 - `envFiles`(extension 级,可选):自定义注入 env 的命名空间映射,key → 一个或多个相对项目根目录的 JSON/TOML 文件路径。每个 key 会成为注入给 `__entry` 的 ctx 上的独立字段(如配置 `aEnv` → `ctx.aEnv`),多个文件内容按顺序浅合并,后面的文件覆盖前面的同名 key;文件内容必须是 JSON/TOML 对象。key 必须是合法 JS 标识符,且不能与 `configPath`/`env`/`appConfig` 冲突;路径必须位于项目根目录内(不支持绝对路径或 `../` 逃逸)。dev/deploy 开始时会在终端输出一行"Custom env files injected"提示,列出每个 key 实际加载的文件(全部缺失的 key 显示 `(none)`);某个文件缺失只打印 warning 并跳过,对应 key 保留其余文件合并结果(全部缺失时为 `{}`),不会中断命令;`envFiles` 本身不是对象时也只会 warning 并按空对象处理。格式不支持、解析失败或内容不是对象仍会直接报错。
 - `failOnUnresolvedPlaceholders`(extension 级):注入后若目标文件残留模板占位符则报错的行为开关。
 
-`extensionsRoot`、`entryFileName`、`restoreMarkers` 是内部默认(分别为 `extensions`、`__entry.js`、`true`),新项目不再写入配置文件;已有配置仍可覆盖,用于向后兼容。`init --update` 合并时只补齐 `configFiles`、`failOnUnresolvedPlaceholders`,不会覆盖用户已有的同名字段(包括 `envFiles`)。
+`extensionsRoot`、`entryFileName`、`restoreMarkers` 是内部默认(分别为 `extensions`、`__entry.js`、`true`),新项目不再写入配置文件;已有配置仍可覆盖,用于向后兼容。`init` 对已存在的配置只做缺字段合并:只补齐 `configFiles`、`failOnUnresolvedPlaceholders`,不会覆盖用户已有的同名字段(包括 `envFiles`)。
 
 ### 配置类型提示
 
@@ -221,7 +219,7 @@ export default defineConfig({
 });
 ```
 
-注意 `defineConfig` 写法要求项目里能 `import` 到 `@bestfulfill/bshopify`(本地安装或 link 的包);若 bshopify 只装在全局、项目未安装该包,配置加载的动态 import 会失败,此时请用上面的 JSDoc 形式。两种写法 CLI 都能正常读取,`init --update` 也能自动合并;JSDoc 形式没有运行时依赖,是 `init` 生成的默认模板。
+注意 `defineConfig` 写法要求项目里能 `import` 到 `@bestfulfill/bshopify`(本地安装或 link 的包);若 bshopify 只装在全局、项目未安装该包,配置加载的动态 import 会失败,此时请用上面的 JSDoc 形式。两种写法 CLI 都能正常读取,`init` 也能自动合并缺字段;JSDoc 形式没有运行时依赖,是 `init` 生成的默认模板。
 
 ## dev 命令
 
@@ -268,7 +266,7 @@ export default {
 };
 ```
 
-因此编辑器里 `ctx`（`ExtensionContext`，含 `configPath` / `env` / `appConfig`）、`plan`（`PreparedExtensionPlan`）、`result`（`ExtensionDeployResult`）等参数都有补全与错误提示。类型来自 `@bestfulfill/bshopify` 的公开导出（`ExtensionLifecycle` / `ExtensionContext` / `InjectionPlan` / `PreparedExtensionPlan` / `ExtensionDeployResult` 等）；后续模板升级时，`init --update` 会把 manifest 里记录的生成 entry 刷新到最新模板。
+因此编辑器里 `ctx`（`ExtensionContext`，含 `configPath` / `env` / `appConfig`）、`plan`（`PreparedExtensionPlan`）、`result`（`ExtensionDeployResult`）等参数都有补全与错误提示。类型来自 `@bestfulfill/bshopify` 的公开导出（`ExtensionLifecycle` / `ExtensionContext` / `InjectionPlan` / `PreparedExtensionPlan` / `ExtensionDeployResult` 等）；模板随版本升级时不会自动刷新已生成的 entry，按发布说明（CHANGELOG / 迁移指南）处理，必要时删除受管 entry 后重新执行 `init` 让其按新模板重建。
 
 当一个 `__entry.js` 仍是未改动过的生成模板（即占位 entry，没有任何 injections 或 hook 逻辑）时，`dev` / `deploy` 会**直接跳过它**：不加载模块、不执行 `prepare`、不注入、不在 deploy summary 中列出，只打印一行 `Skipped N placeholder extension entries ...`。只有真正编写了注入或 hook 的 entry 才会进入执行链路。这能避免多 extension 项目里大量空模板带来的无效 import 与输出噪声；若你改了模板（例如补一个 injection），它就不再是占位文件，会自动回到执行链路。
 
@@ -292,10 +290,9 @@ src/
   extension/       # extension 域（受管单元层）：Shopify extension 及其 entry，只被 app 依赖
     types.ts       # ExtensionInfo / ExtensionLifecycle / ManagedEntry 等扩展域类型
     entries.ts     # 扩展发现 + entry 加载 + 生命周期编排（prepare/validate/beforeDeploy/...）
-    entry-loader.ts# 运行时加载扩展 entry 模块
-    manage.ts      # init 时的 entry 写入/清理/重命名（与 app 通过结构化类型解耦）
-    manage-stale.ts# entry 旧坐标清理与重命名
-    manage-content.ts # entry 模板与内容哈希
+    entry-loader.ts # 运行时加载扩展 entry 模块
+    manage.ts       # init 时的 entry 写入与 manifest 记录（与 app 通过结构化类型解耦）
+    manage-content.ts # entry 模板与占位识别
     paths.ts       # 注入目标路径安全校验
 tests/
   cli.test.ts      # CLI 元信息、命令面、fallback、目录结构和 dev/deploy 行为测试

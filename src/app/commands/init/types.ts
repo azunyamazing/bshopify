@@ -4,10 +4,7 @@ export interface InitOptions {
   check?: boolean;
   cwd?: string;
   runShopifyCommand?: ShopifyCommandRunner;
-  update?: boolean;
 }
-
-export type InitMode = "check" | "init" | "update";
 
 export interface InitCheck {
   message: string;
@@ -19,7 +16,6 @@ export interface InitResult {
   checks: InitCheck[];
   created: string[];
   errors: string[];
-  mode?: InitMode;
   skipped: string[];
   updated: string[];
   warnings: string[];

@@ -422,7 +422,6 @@ describe("bshopify CLI", () => {
         join(process.cwd(), "src", "extension", "entries.ts"),
         join(process.cwd(), "src", "extension", "entry-loader.ts"),
         join(process.cwd(), "src", "extension", "manage-content.ts"),
-        join(process.cwd(), "src", "extension", "manage-stale.ts"),
         join(process.cwd(), "src", "extension", "manage.ts"),
         join(process.cwd(), "src", "extension", "paths.ts"),
         join(process.cwd(), "src", "extension", "types.ts"),
@@ -481,7 +480,6 @@ describe("bshopify CLI", () => {
         "bshopify",
         "app",
         "init",
-        "--update",
         "--check",
         "--cwd",
         "/tmp/shopify-app",
@@ -493,7 +491,6 @@ describe("bshopify CLI", () => {
     expect(initProject).toHaveBeenCalledWith({
       check: true,
       cwd: "/tmp/shopify-app",
-      update: true,
     });
   });
 

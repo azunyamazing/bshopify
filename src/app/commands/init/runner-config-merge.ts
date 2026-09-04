@@ -33,9 +33,9 @@ function reconcileRunnerConfigSource(
   replaceConfigFiles: boolean,
 ): string | undefined {
   // Matches both the plain `export default { ... }` form and the
-  // Vite-style `export default defineConfig({ ... })` form, so `--update`
-  // can reconcile configs either way. The wrapper function is an identity,
-  // so merging the body between the braces behaves identically.
+  // Vite-style `export default defineConfig({ ... })` form, so `init` can
+  // reconcile existing configs either way. The wrapper function is an
+  // identity, so merging the body between the braces behaves identically.
   const match = source.match(
     /export\s+default\s+(?:defineConfig\s*\()?\{([\s\S]*)\}\s*\)?\s*;?\s*$/,
   );
