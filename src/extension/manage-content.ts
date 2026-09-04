@@ -6,9 +6,10 @@ import { readFile } from "node:fs/promises";
  * This is a bshopify artifact (a hook file), not the Shopify extension
  * itself; the extension domain owns its template and lifecycle contract.
  *
- * The template is intentionally typed for editors: `// @ts-check` plus a
- * JSDoc `@type` reference to the package's `ExtensionLifecycle` give full
- * hints for `ctx` / `plan` / `plans` / `result` / `error` while editing.
+ * The template is intentionally typed for editors: `// @ts-check` plus
+ * self-contained JSDoc typedefs (no package import) give hints for
+ * `ctx` / `plan` / `plans` / `result` / `error` whether bshopify is
+ * installed in this project or only available globally.
  * An entry that is still byte-identical to this template is a placeholder:
  * it has no runtime effect, so dev / deploy skip loading it.
  */
@@ -16,16 +17,48 @@ export const managedEntryTemplate = `// @ts-check
 /**
  * bshopify-managed extension entry.
  *
- * Types come from the package itself: ctx / plan / plans / result are
- * inferred through the type reference below, so your editor gives
- * completion and errors while you edit this file.
+ * The typedefs below are self-contained (no package import), so editors
+ * type-check this file whether bshopify is installed in this project or
+ * only available as a global install: ctx / plan / plans / result / error
+ * are inferred while you edit the hook bodies.
  *
  * An entry that is still the generated template is a placeholder with no
  * runtime effect: dev / deploy skip loading and processing it entirely.
  * It only matters once you add injections or hook bodies.
  *
- * @type {import('@standhigher/bshopify').ExtensionLifecycle}
+ * @typedef {Object} BshopifyExtensionContext
+ * @property {string} configPath Currently enabled Shopify app TOML file name.
+ * @property {string} env The \`configFiles\` key of the current environment (dev / test / production).
+ * @property {Object.<string, *>} appConfig Parsed contents of the TOML file.
+ *
+ * @typedef {Object} BshopifyInjectionPlan
+ * @property {string} file Root-relative target file.
+ * @property {string} pattern Template placeholder to replace.
+ * @property {'replace'} strategy Replacement strategy.
+ * @property {*} value Value to inject.
+ *
+ * @typedef {Object} BshopifyExtensionPlanResult
+ * @property {string} [extension] Extension name the plan belongs to.
+ * @property {BshopifyInjectionPlan[]} injections Injections to apply.
+ *
+ * @typedef {Object} BshopifyExtensionDeployResult
+ * @property {boolean} deployed Whether the deploy ran.
+ * @property {boolean} dryRun Whether this was a dry run.
+ * @property {number} exitCode Shopify CLI exit code.
+ *
+ * @typedef {Object} BshopifyPreparedExtensionPlan
+ * @property {string} extension Extension name.
+ * @property {BshopifyInjectionPlan[]} injections Injections to apply.
+ *
+ * @typedef {Object} BshopifyExtensionLifecycle
+ * @property {(ctx: BshopifyExtensionContext) => BshopifyExtensionPlanResult | Promise<BshopifyExtensionPlanResult>} prepare
+ * @property {(ctx: BshopifyExtensionContext, plan: BshopifyPreparedExtensionPlan, plans: BshopifyPreparedExtensionPlan[]) => void | Promise<void>} [validate]
+ * @property {(ctx: BshopifyExtensionContext, plan: BshopifyPreparedExtensionPlan, plans: BshopifyPreparedExtensionPlan[]) => void | Promise<void>} [beforeDeploy]
+ * @property {(ctx: BshopifyExtensionContext, result: BshopifyExtensionDeployResult) => void | Promise<void>} [afterDeploy]
+ * @property {(ctx: BshopifyExtensionContext, error: *) => void | Promise<void>} [onError]
  */
+
+/** @type {BshopifyExtensionLifecycle} */
 export default {
   async prepare(ctx) {
     return {

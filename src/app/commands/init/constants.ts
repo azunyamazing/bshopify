@@ -11,18 +11,17 @@ export function renderRunnerConfigTemplate(configFiles: Record<string, string>):
  * bshopify runner config.
  *
  * This file controls how bshopify selects Shopify app config files and how
- * extension injections behave during dev and deploy. The JSDoc type
- * reference below wires editor completion and error hints to the package's
- * config types while you edit this file, like the generated \`__entry.js\`
- * files do for the extension lifecycle. Every field is optional: omitted
- * fields fall back to the internal defaults.
+ * extension injections behave during dev and deploy. The typedef below is
+ * self-contained (no package import), so editors type-check this file with a
+ * global install just as well as a local one. Every field is optional.
  *
- * Alternatively, if the package is installed in this project, you may wrap
- * the object below with the package's defineConfig helper to get the same
- * hints from a type-checked call instead of the JSDoc annotation.
- *
- * @type {import('@standhigher/bshopify').RunnerConfigInput}
+ * @typedef {Object} BshopifyRunnerConfig
+ * @property {Record<string, string>} [configFiles] Shopify app config files by environment (key → root-relative \`shopify.app*.toml\`).
+ * @property {Record<string, string | string[]>} [envFiles] Custom env namespaces injected into the extension entry context (key → one or more root-relative JSON/TOML file paths).
+ * @property {boolean} [failOnUnresolvedPlaceholders] Fail when an injection plan leaves template placeholders unresolved.
  */
+
+/** @type {BshopifyRunnerConfig} */
 export default {
   // --- App: Shopify app config files by environment ---
   configFiles: {

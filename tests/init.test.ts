@@ -93,9 +93,22 @@ describe("initProject", () => {
 
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
     expect(runnerConfig).toContain("// @ts-check");
+    expect(runnerConfig).toContain("@typedef {Object} BshopifyRunnerConfig");
     expect(runnerConfig).toContain(
-      "@type {import('@standhigher/bshopify').RunnerConfigInput}",
+      "@property {Record<string, string>} [configFiles]",
     );
+    expect(runnerConfig).toContain(
+      "@property {Record<string, string | string[]>} [envFiles]",
+    );
+    expect(runnerConfig).toContain(
+      "@property {boolean} [failOnUnresolvedPlaceholders]",
+    );
+    expect(runnerConfig).toContain("/** @type {BshopifyRunnerConfig} */");
+    // The generated config must stay self-contained: no package import or
+    // module reference, so global-only installs type-check without errors.
+    expect(runnerConfig).not.toContain("@standhigher/bshopify");
+    expect(runnerConfig).not.toContain("import(");
+    expect(runnerConfig).not.toContain("defineConfig");
     expect(runnerConfig).toContain("Shopify app config files by environment");
     expect(runnerConfig).toContain("configFiles:");
     expect(runnerConfig).toContain("failOnUnresolvedPlaceholders: true");
@@ -112,9 +125,18 @@ describe("initProject", () => {
     await expect(readFile(join(cwd, ".git", "hooks", "pre-commit"), "utf8")).resolves.toContain(
       "./node_modules/.bin/bshopify app guard",
     );
-    await expect(
-      readFile(join(cwd, "extensions", "theme-extension", "__entry.js"), "utf8"),
-    ).resolves.toContain("async prepare(ctx)");
+    const entry = await readFile(
+      join(cwd, "extensions", "theme-extension", "__entry.js"),
+      "utf8",
+    );
+    expect(entry).toContain("async prepare(ctx)");
+    expect(entry).toContain("// @ts-check");
+    expect(entry).toContain("@typedef {Object} BshopifyExtensionLifecycle");
+    expect(entry).toContain("/** @type {BshopifyExtensionLifecycle} */");
+    // The generated entry must stay self-contained: no package import or
+    // module reference, so global-only installs type-check without errors.
+    expect(entry).not.toContain("@standhigher/bshopify");
+    expect(entry).not.toContain("import(");
 
     // init leaves package.json scripts to the user and never overrides them.
     const packageJson = JSON.parse(
@@ -1048,4 +1070,30 @@ describe("initProject", () => {
   });
 
 
+});
+
+describe("runner config template typing", () => {
+  it("keeps the generated config typedef in sync with the documented team-facing config fields", async () => {
+    const constantsSource = await readFile(
+      join(process.cwd(), "src", "app", "commands", "init", "constants.ts"),
+      "utf8",
+    );
+    const typesSource = await readFile(
+      join(process.cwd(), "src", "app", "runner", "types.ts"),
+      "utf8",
+    );
+
+    const typedefProperties = new Set(
+      [...constantsSource.matchAll(/@property \{.*?\} \[([A-Za-z]+)\]/g)].map(
+        (match) => match[1],
+      ),
+    );
+    const teamFacingMatch = typesSource.match(
+      /Only `([A-Za-z]+)`, `([A-Za-z]+)`, and `([A-Za-z]+)` are/,
+    );
+    expect(teamFacingMatch).not.toBeNull();
+    const teamFacing = new Set(teamFacingMatch?.slice(1) ?? []);
+
+    expect(typedefProperties).toEqual(teamFacing);
+  });
 });
