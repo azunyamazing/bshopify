@@ -24,7 +24,7 @@ export const managedEntryTemplate = `// @ts-check
  * runtime effect: dev / deploy skip loading and processing it entirely.
  * It only matters once you add injections or hook bodies.
  *
- * @type {import('@bestfulfill/bshopify').ExtensionLifecycle}
+ * @type {import('@standhigher/bshopify').ExtensionLifecycle}
  */
 export default {
   async prepare(ctx) {

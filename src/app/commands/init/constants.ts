@@ -21,7 +21,7 @@ export function renderRunnerConfigTemplate(configFiles: Record<string, string>):
  * the object below with the package's defineConfig helper to get the same
  * hints from a type-checked call instead of the JSDoc annotation.
  *
- * @type {import('@bestfulfill/bshopify').RunnerConfigInput}
+ * @type {import('@standhigher/bshopify').RunnerConfigInput}
  */
 export default {
   // --- App: Shopify app config files by environment ---

@@ -21,7 +21,7 @@ export type { RunnerConfigInput } from "./app/runner/types";
 // Extension entry lifecycle types: what `__entry.js` authors need to type
 // their prepare / validate / beforeDeploy / afterDeploy / onError hooks.
 // The generated entry template references these via JSDoc:
-// `@type {import('@bestfulfill/bshopify').ExtensionLifecycle}`.
+// `@type {import('@standhigher/bshopify').ExtensionLifecycle}`.
 export type {
   ExtensionContext,
   ExtensionDeployResult,

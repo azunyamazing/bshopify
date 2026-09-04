@@ -1,5 +1,5 @@
 {
-  "name": "@bestfulfill/bshopify",
+  "name": "@standhigher/bshopify",
   "version": "0.1.0",
   "description": "BestFulfill Shopify App Runner CLI.",
   "type": "module",
@@ -17,9 +17,6 @@
   "files": [
     "dist"
   ],
-  "publishConfig": {
-    "registry": "https://packages.aliyun.com/686b883471b943e5958efa4c/npm/npm-registry/"
-  },
   "scripts": {
     "build": "tsup && chmod +x dist/cli.js",
     "check": "npm run typecheck && npm run test && npm run build && npm run verify:dist",

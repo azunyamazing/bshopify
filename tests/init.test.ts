@@ -94,7 +94,7 @@ describe("initProject", () => {
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
     expect(runnerConfig).toContain("// @ts-check");
     expect(runnerConfig).toContain(
-      "@type {import('@bestfulfill/bshopify').RunnerConfigInput}",
+      "@type {import('@standhigher/bshopify').RunnerConfigInput}",
     );
     expect(runnerConfig).toContain("Shopify app config files by environment");
     expect(runnerConfig).toContain("configFiles:");
@@ -492,25 +492,25 @@ describe("initProject", () => {
     // A defineConfig-style config imports the package at runtime, so the
     // fixture needs it resolvable from the project (a real install would
     // provide the same resolution).
-    await mkdir(join(cwd, "node_modules", "@bestfulfill", "bshopify"), {
+    await mkdir(join(cwd, "node_modules", "@standhigher", "bshopify"), {
       recursive: true,
     });
     await writeFile(
-      join(cwd, "node_modules", "@bestfulfill", "bshopify", "package.json"),
+      join(cwd, "node_modules", "@standhigher", "bshopify", "package.json"),
       `${JSON.stringify({
         exports: { ".": "./index.mjs" },
-        name: "@bestfulfill/bshopify",
+        name: "@standhigher/bshopify",
         type: "module",
       })}\n`,
     );
     await writeFile(
-      join(cwd, "node_modules", "@bestfulfill", "bshopify", "index.mjs"),
+      join(cwd, "node_modules", "@standhigher", "bshopify", "index.mjs"),
       "export function defineConfig(config) { return config; }\n",
     );
     await writeFile(
       join(cwd, "bshopify.config.mjs"),
       [
-        "import { defineConfig } from \"@bestfulfill/bshopify\";",
+        "import { defineConfig } from \"@standhigher/bshopify\";",
         "",
         "export default defineConfig({",
         '  entryFileName: "entry.mjs",',
@@ -524,7 +524,7 @@ describe("initProject", () => {
     const runnerConfig = await readFile(join(cwd, "bshopify.config.mjs"), "utf8");
 
     expect(result.errors).toEqual([]);
-    expect(runnerConfig).toContain('import { defineConfig } from "@bestfulfill/bshopify"');
+    expect(runnerConfig).toContain('import { defineConfig } from "@standhigher/bshopify"');
     expect(runnerConfig).toContain('export default defineConfig({');
     expect(runnerConfig).toContain('entryFileName: "entry.mjs"');
     expect(runnerConfig).toContain('customField: "kept"');

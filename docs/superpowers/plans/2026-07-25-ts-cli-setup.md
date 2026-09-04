@@ -2,17 +2,16 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将空仓库初始化为 `@bestfulfill/bshopify` TypeScript CLI npm 包骨架，并对齐飞书技术方案中的包名、bin、私有 npm 云仓、基础命令入口和构建验证。
+**Goal:** 将空仓库初始化为 `@standhigher/bshopify` TypeScript CLI npm 包骨架，并对齐飞书技术方案中的包名、bin、基础命令入口和构建验证。
 
 **Architecture:** 使用 ESM + TypeScript 编写 CLI，`src/cli.ts` 作为 bin 入口，`src/index.ts` 暴露可测试的命令构建函数。用 `commander` 管理命令，用 `tsup` 输出 `dist/cli.js` 和类型声明，用 `vitest` 验证基础 CLI 行为。
 
-**Tech Stack:** TypeScript, Node.js >= 18.17, commander, tsup, vitest, npm, 阿里云 npm registry。
+**Tech Stack:** TypeScript, Node.js >= 18.17, commander, tsup, vitest, npm。
 
 ---
 
 ## 文件结构
 
-- Create: `.npmrc`，配置阿里云云仓 registry。
 - Create: `.gitignore`，忽略 `node_modules/`、`dist/`、coverage 和 `.bshopify/`。
 - Create: `package.json`，声明 npm 包名、bin、exports、scripts、依赖和发布文件。
 - Create: `tsconfig.json`，配置严格 TypeScript 编译。
@@ -37,7 +36,7 @@ import { createCliProgram, packageInfo } from "../src/index.js";
 
 describe("bshopify CLI", () => {
   it("exposes the package name and version", () => {
-    expect(packageInfo.name).toBe("@bestfulfill/bshopify");
+    expect(packageInfo.name).toBe("@standhigher/bshopify");
     expect(packageInfo.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 
@@ -83,7 +82,7 @@ export interface PackageInfo {
 }
 
 export const packageInfo: PackageInfo = {
-  name: "@bestfulfill/bshopify",
+  name: "@standhigher/bshopify",
   version: "0.1.0",
 };
 
@@ -116,24 +115,19 @@ Run: `npm test -- tests/cli.test.ts`
 
 Expected: PASS.
 
-### Task 3: npm 包与私有云仓配置
+### Task 3: npm 包配置
 
 **Files:**
-- Create: `.npmrc`
 - Create: `.gitignore`
 - Modify: `package.json`
 
-- [ ] **Step 1: Configure registry and package metadata**
-
-```toml
-registry=https://packages.aliyun.com/686b883471b943e5958efa4c/npm/npm-registry/
-```
+- [ ] **Step 1: Configure package metadata**
 
 `package.json` must include:
 
 ```json
 {
-  "name": "@bestfulfill/bshopify",
+  "name": "@standhigher/bshopify",
   "type": "module",
   "bin": {
     "bshopify": "./dist/cli.js"
@@ -169,7 +163,6 @@ Expected: only intended project scaffold files are listed.
 
 ## 自检
 
-- 覆盖飞书云仓：`.npmrc` 指向文档提供的阿里云 registry。
 - 覆盖技术方案：包名、bin、推荐 scripts、ESM、TypeScript、tsup、vitest 与 MVP 命令面均落地。
 - TypeScript 对象形状：使用 `interface PackageInfo`。
 - 未把未知业务配置默认成 `0`、`Unknown`、测试地址或生产地址。

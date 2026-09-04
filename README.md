@@ -1,6 +1,6 @@
 # bshopify
 
-`@bestfulfill/bshopify` 是 BestFulfill 团队的 Shopify App Runner CLI。它用于统一接管团队项目中的 `shopify app xx` 入口，并在真实 Shopify CLI 执行前后编排 Extension Entry、配置注入、恢复、校验和提交防护。
+`@standhigher/bshopify` 是 BestFulfill 团队的 Shopify App Runner CLI。它用于统一接管团队项目中的 `shopify app xx` 入口，并在真实 Shopify CLI 执行前后编排 Extension Entry、配置注入、恢复、校验和提交防护。
 
 当前仓库处于 TypeScript CLI MVP 阶段：包名、bin、构建链路、测试链路和基础命令面已经接入，`app init` 已实现项目初始化。CLI 会优先接管 bshopify 已实现的命令；未接管的命令会按原参数降级执行本机 `shopify` CLI。
 
@@ -10,39 +10,12 @@
 - npm
 - Shopify CLI，未接管命令会通过 `execa` 优先使用项目本地 `node_modules/.bin/shopify`，找不到时再使用用户 PATH 中的 `shopify`
 
-## 私有 npm 云仓
-
-项目已在 `.npmrc` 中配置阿里云 npm registry：
-
-```ini
-registry=https://packages.aliyun.com/686b883471b943e5958efa4c/npm/npm-registry/
-```
-
-安装或发布私有包前，需要先登录云仓：
-
-```bash
-npm login --registry=https://packages.aliyun.com/686b883471b943e5958efa4c/npm/npm-registry/
-```
-
-发布前请确保已更新 `package.json` 中的 `version`，并通过完整检查：
-
-```bash
-npm run check
-npm publish --registry=https://packages.aliyun.com/686b883471b943e5958efa4c/npm/npm-registry/
-```
-
 ## 本地开发
 
 安装依赖：
 
 ```bash
 npm install
-```
-
-如果当前本机没有云仓读取权限，可以临时使用公共 registry 安装公开依赖：
-
-```bash
-npm install --registry=https://registry.npmjs.org
 ```
 
 常用命令：
@@ -63,7 +36,7 @@ npm run build
 npm link
 
 # 在目标 Shopify app 项目中使用本地包
-npm link @bestfulfill/bshopify
+npm link @standhigher/bshopify
 bshopify app init --check
 ```
 
@@ -71,10 +44,10 @@ bshopify app init --check
 
 ```bash
 # 在目标 Shopify app 项目中取消引用本地包
-npm unlink @bestfulfill/bshopify
+npm unlink @standhigher/bshopify
 
 # 在 bshopify 仓库中取消全局 link
-npm unlink -g @bestfulfill/bshopify
+npm unlink -g @standhigher/bshopify
 ```
 
 ## CLI 命令
@@ -177,7 +150,7 @@ bshopify app clear
 /**
  * bshopify runner config.
  *
- * @type {import('@bestfulfill/bshopify').RunnerConfigInput}
+ * @type {import('@standhigher/bshopify').RunnerConfigInput}
  */
 export default {
   // --- App: Shopify app config files by environment ---
@@ -206,20 +179,20 @@ export default {
 
 ### 配置类型提示
 
-和生成的 `__entry.js` 一样,`bshopify.config.mjs` 的类型也来自包本身:文件里的 `// @ts-check` 配合 JSDoc `@type {import('@bestfulfill/bshopify').RunnerConfigInput}` 让编辑器对 `configFiles` / `envFiles` / `failOnUnresolvedPlaceholders` 等字段给出补全与错误提示(`RunnerConfigInput` 是包对外导出的公开类型,所有字段可选,缺省走运行时默认值)。旧版本生成的、不带注解的配置文件不需要改写,CLI 读取不受影响。
+和生成的 `__entry.js` 一样,`bshopify.config.mjs` 的类型也来自包本身:文件里的 `// @ts-check` 配合 JSDoc `@type {import('@standhigher/bshopify').RunnerConfigInput}` 让编辑器对 `configFiles` / `envFiles` / `failOnUnresolvedPlaceholders` 等字段给出补全与错误提示(`RunnerConfigInput` 是包对外导出的公开类型,所有字段可选,缺省走运行时默认值)。旧版本生成的、不带注解的配置文件不需要改写,CLI 读取不受影响。
 
 偏好 Vite 风格时,也可以显式用 `defineConfig` 包裹默认导出(包对外导出的 identity 帮助函数,只为类型检查与提示):
 
 ```js
 // @ts-check
-import { defineConfig } from "@bestfulfill/bshopify";
+import { defineConfig } from "@standhigher/bshopify";
 
 export default defineConfig({
   restoreMarkers: false,
 });
 ```
 
-注意 `defineConfig` 写法要求项目里能 `import` 到 `@bestfulfill/bshopify`(本地安装或 link 的包);若 bshopify 只装在全局、项目未安装该包,配置加载的动态 import 会失败,此时请用上面的 JSDoc 形式。两种写法 CLI 都能正常读取,`init` 也能自动合并缺字段;JSDoc 形式没有运行时依赖,是 `init` 生成的默认模板。
+注意 `defineConfig` 写法要求项目里能 `import` 到 `@standhigher/bshopify`(本地安装或 link 的包);若 bshopify 只装在全局、项目未安装该包,配置加载的动态 import 会失败,此时请用上面的 JSDoc 形式。两种写法 CLI 都能正常读取,`init` 也能自动合并缺字段;JSDoc 形式没有运行时依赖,是 `init` 生成的默认模板。
 
 ## dev 命令
 
@@ -243,7 +216,7 @@ bshopify app dev --config test
 
 ```js
 // @ts-check
-/** @type {import('@bestfulfill/bshopify').RunnerConfigInput} */
+/** @type {import('@standhigher/bshopify').RunnerConfigInput} */
 export default {
   restoreMarkers: false,
 };
@@ -257,7 +230,7 @@ export default {
 
 ```js
 // @ts-check
-/** @type {import('@bestfulfill/bshopify').ExtensionLifecycle} */
+/** @type {import('@standhigher/bshopify').ExtensionLifecycle} */
 export default {
   async prepare(ctx) {
     return { injections: [ /* ... */ ] };
@@ -266,7 +239,7 @@ export default {
 };
 ```
 
-因此编辑器里 `ctx`（`ExtensionContext`，含 `configPath` / `env` / `appConfig`）、`plan`（`PreparedExtensionPlan`）、`result`（`ExtensionDeployResult`）等参数都有补全与错误提示。类型来自 `@bestfulfill/bshopify` 的公开导出（`ExtensionLifecycle` / `ExtensionContext` / `InjectionPlan` / `PreparedExtensionPlan` / `ExtensionDeployResult` 等）；模板随版本升级时不会自动刷新已生成的 entry，按发布说明（CHANGELOG / 迁移指南）处理，必要时删除受管 entry 后重新执行 `init` 让其按新模板重建。
+因此编辑器里 `ctx`（`ExtensionContext`，含 `configPath` / `env` / `appConfig`）、`plan`（`PreparedExtensionPlan`）、`result`（`ExtensionDeployResult`）等参数都有补全与错误提示。类型来自 `@standhigher/bshopify` 的公开导出（`ExtensionLifecycle` / `ExtensionContext` / `InjectionPlan` / `PreparedExtensionPlan` / `ExtensionDeployResult` 等）；模板随版本升级时不会自动刷新已生成的 entry，按发布说明（CHANGELOG / 迁移指南）处理，必要时删除受管 entry 后重新执行 `init` 让其按新模板重建。
 
 当一个 `__entry.js` 仍是未改动过的生成模板（即占位 entry，没有任何 injections 或 hook 逻辑）时，`dev` / `deploy` 会**直接跳过它**：不加载模块、不执行 `prepare`、不注入、不在 deploy summary 中列出，只打印一行 `Skipped N placeholder extension entries ...`。只有真正编写了注入或 hook 的 entry 才会进入执行链路。这能避免多 extension 项目里大量空模板带来的无效 import 与输出噪声；若你改了模板（例如补一个 injection），它就不再是占位文件，会自动回到执行链路。
 

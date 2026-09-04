@@ -218,7 +218,7 @@ describe("bshopify CLI", () => {
   });
 
   it("exposes the package name and version", () => {
-    expect(packageInfo.name).toBe("@bestfulfill/bshopify");
+    expect(packageInfo.name).toBe("@standhigher/bshopify");
     expect(packageInfo.version).toMatch(/^\d+\.\d+\.\d+/);
   });
 

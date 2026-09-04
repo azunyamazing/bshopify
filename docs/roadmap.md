@@ -1,6 +1,6 @@
 # bshopify CLI 版本计划方案（Roadmap）
 
-> 状态：待评审。`@bestfulfill/bshopify` 是团队内部的 **Shopify CLI 增强层**：统一接管 `shopify app/theme` 入口，
+> 状态：待评审。`@standhigher/bshopify` 是团队内部的 **Shopify CLI 增强层**：统一接管 `shopify app/theme` 入口，
 > 在真实 Shopify CLI（当前基准 4.7.0）执行前后编排 Extension Entry 注入、配置/环境注入、恢复、校验和提交防护。
 > 本文按三期给出每期**具体实现什么**，每项都标注对应的 Shopify CLI 命令与其增强点。
 > 当前版本：`0.1.0`（TS CLI MVP）。
@@ -96,7 +96,7 @@
 ### 3.7 工程化底座
 
 - 统一退出码/错误分类；`--verbose` 调试日志
-- GitHub Actions：typecheck / test / build / verify / smoke + 云仓 publish 流水线
+- GitHub Actions：typecheck / test / build / verify / smoke + npm publish 流水线
 - 测试加固：guard / validate / restore / transaction 回放测试
 
 **验收**：`npm run check` 全绿；guard 在注入残留/锁/占位符三类场景下正确拦截；`bshopify app validate --json` 可在 CI 当门禁；dev watch 在 entry 变更时重新注入；CI 自动发布 0.2.x。
@@ -177,7 +177,7 @@
 ### 5.4 稳定性与发布
 
 - 兼容矩阵：Node 版本 × Shopify CLI 4.x 各 minor × OS，自动化 smoke
-- semantic-release：自动版本 + CHANGELOG + 云仓发布
+- semantic-release：自动版本 + CHANGELOG + npm 发布
 - 文档站 + 从 v0 的迁移指南
 - 性能优化：20+ extension 项目的启动与注入耗时
 - 可选遥测：默认关闭的错误上报/使用统计
