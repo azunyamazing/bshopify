@@ -172,9 +172,15 @@ bshopify app clear
 
 ## 配置
 
-项目接入后由 `init` 生成 `bshopify.config.mjs`,按 app / extension 两段组织,只暴露团队需要关心的字段:
+项目接入后由 `init` 生成 `bshopify.config.mjs`,按 app / extension 两段组织,只暴露团队需要关心的字段。生成的文件自带类型提示:首行 `// @ts-check`,并用 JSDoc 把默认导出标注成包的 `RunnerConfigInput` 类型,所以编辑 `configFiles` / `envFiles` 等字段时有补全和错误提示:
 
 ```js
+// @ts-check
+/**
+ * bshopify runner config.
+ *
+ * @type {import('@bestfulfill/bshopify').RunnerConfigInput}
+ */
 export default {
   // --- App: Shopify app config files by environment ---
   configFiles: {
@@ -200,6 +206,23 @@ export default {
 
 `extensionsRoot`、`entryFileName`、`restoreMarkers` 是内部默认(分别为 `extensions`、`__entry.js`、`true`),新项目不再写入配置文件;已有配置仍可覆盖,用于向后兼容。`init --update` 合并时只补齐 `configFiles`、`failOnUnresolvedPlaceholders`,不会覆盖用户已有的同名字段(包括 `envFiles`)。
 
+### 配置类型提示
+
+和生成的 `__entry.js` 一样,`bshopify.config.mjs` 的类型也来自包本身:文件里的 `// @ts-check` 配合 JSDoc `@type {import('@bestfulfill/bshopify').RunnerConfigInput}` 让编辑器对 `configFiles` / `envFiles` / `failOnUnresolvedPlaceholders` 等字段给出补全与错误提示(`RunnerConfigInput` 是包对外导出的公开类型,所有字段可选,缺省走运行时默认值)。旧版本生成的、不带注解的配置文件不需要改写,CLI 读取不受影响。
+
+偏好 Vite 风格时,也可以显式用 `defineConfig` 包裹默认导出(包对外导出的 identity 帮助函数,只为类型检查与提示):
+
+```js
+// @ts-check
+import { defineConfig } from "@bestfulfill/bshopify";
+
+export default defineConfig({
+  restoreMarkers: false,
+});
+```
+
+注意 `defineConfig` 写法要求项目里能 `import` 到 `@bestfulfill/bshopify`(本地安装或 link 的包);若 bshopify 只装在全局、项目未安装该包,配置加载的动态 import 会失败,此时请用上面的 JSDoc 形式。两种写法 CLI 都能正常读取,`init --update` 也能自动合并;JSDoc 形式没有运行时依赖,是 `init` 生成的默认模板。
+
 ## dev 命令
 
 默认使用 `shopify.app.dev.toml` 生成注入上下文，并执行 `shopify app dev --config dev`：
@@ -221,6 +244,8 @@ bshopify app dev --config test
 `dev` 默认会在注入值后追加按文件类型生成的 restore marker（自描述格式：占位符 + 注入值长度 + 注入值校验和 + 随机串，不包含注入值本身），结束后只恢复本轮注入的值。marker 会按目标文件类型选择注释语法（如 js/css 用 `/* */`、html 用 `<!-- -->`、liquid 用 `{% comment %}`，toml 用 `#` 行注释并放到行尾），因此注入到 `shopify.app*.toml`、`shopify.extension.toml` 等 TOML 文件时仍是合法 TOML，Shopify CLI 可正常解析。marker 同时是 Git clean filter 的还原依据，也是进程被杀后恢复的依据。校验和用于只信任真正由 bshopify 写入的 marker：文件里形似 marker 的普通文本、或 dev 期间被手改过的注入值都不会被错误还原。若遇到未覆盖的文件类型或注释语法不兼容，仍可在 `bshopify.config.mjs` 显式写 `restoreMarkers: false` 关闭（内部默认，向后兼容）：
 
 ```js
+// @ts-check
+/** @type {import('@bestfulfill/bshopify').RunnerConfigInput} */
 export default {
   restoreMarkers: false,
 };

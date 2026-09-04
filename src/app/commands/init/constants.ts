@@ -6,10 +6,23 @@ export function renderRunnerConfigTemplate(configFiles: Record<string, string>):
     .map(([env, file]) => `    ${env}: "${file}",`)
     .join("\n");
 
-  return `// bshopify runner config
-// This file controls how bshopify selects Shopify app config files and how
-// extension injections behave during dev and deploy.
-
+  return `// @ts-check
+/**
+ * bshopify runner config.
+ *
+ * This file controls how bshopify selects Shopify app config files and how
+ * extension injections behave during dev and deploy. The JSDoc type
+ * reference below wires editor completion and error hints to the package's
+ * config types while you edit this file, like the generated \`__entry.js\`
+ * files do for the extension lifecycle. Every field is optional: omitted
+ * fields fall back to the internal defaults.
+ *
+ * Alternatively, if the package is installed in this project, you may wrap
+ * the object below with the package's defineConfig helper to get the same
+ * hints from a type-checked call instead of the JSDoc annotation.
+ *
+ * @type {import('@bestfulfill/bshopify').RunnerConfigInput}
+ */
 export default {
   // --- App: Shopify app config files by environment ---
   configFiles: {
