@@ -17,6 +17,13 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/azunyamazing/bshopify.git"
+  },
   "scripts": {
     "build": "tsup && chmod +x dist/cli.js",
     "check": "npm run typecheck && npm run test && npm run build && npm run verify:dist",
